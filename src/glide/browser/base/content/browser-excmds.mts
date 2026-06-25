@@ -14,7 +14,7 @@ import type {
   GlideOperator,
 } from "./browser-excmds-registry.mts";
 import type { ParseResult } from "./utils/args.mjs";
-import type { KeyMappingTrieNode } from "./utils/keys.mts";
+import type { ResolvedMappingNode } from "./modal-engine.mts";
 
 const MozUtils = ChromeUtils.importESModule("chrome://glide/content/utils/moz.mjs");
 const Keys = ChromeUtils.importESModule("chrome://glide/content/utils/keys.mjs", { global: "current" });
