@@ -14,7 +14,7 @@ use crate::actions::{
     BrowserCommandIntent, CommandBarKind, EditTargetIntent, EditingActionIntent,
     EditorOperationIntent, EngineCommand, GlideApplicationAction, GlideApplicationInfo, GlideMode,
     KeySequence, KeymapDefinition, ModeTransition, MotionDirection, MotionIntent,
-    PendingSequenceDisplay, ResolvedKeyResult, WordStyleName,
+    PendingSequenceDisplay, RangeTargetIntent, ResolvedKeyResult, WordStyleName,
 };
 use crate::bindings::{build_modal_machine, from_modalkit_mode, is_displayable_partial_match};
 
@@ -444,6 +444,16 @@ fn edit_target_intent(edit_target: &EditTarget, edit_context: &EditContext) -> E
                 include_line_break: *include_line_break,
             }
         }
+        EditTarget::Range(range_type, inclusive, count) => EditTargetIntent::Range {
+            range: range_target_intent(range_type),
+            inclusive: *inclusive,
+            count: resolve_count(edit_context, count),
+        },
+        EditTarget::Boundary(range_type, inclusive, _terminus, count) => EditTargetIntent::Range {
+            range: range_target_intent(range_type),
+            inclusive: *inclusive,
+            count: resolve_count(edit_context, count),
+        },
         EditTarget::Motion(move_type, count) => EditTargetIntent::Motion {
             motion: motion_intent(move_type),
             count: resolve_count(edit_context, count),
@@ -451,6 +461,32 @@ fn edit_target_intent(edit_target: &EditTarget, edit_context: &EditContext) -> E
         other_target => EditTargetIntent::RawDescription {
             description: format!("{other_target:?}"),
         },
+    }
+}
+
+/// Convert a modalkit [`RangeType`] into a typed [`RangeTargetIntent`].
+///
+/// `Line` is normally handled by `edit_target_intent` as a `LineRange`, but we
+/// still map it here for `Boundary` targets.
+fn range_target_intent(range_type: &RangeType) -> RangeTargetIntent {
+    match range_type {
+        RangeType::Word(word_style) => RangeTargetIntent::Word {
+            word_style: word_style_name(word_style.clone()),
+        },
+        RangeType::Bracketed(left, right) => RangeTargetIntent::Bracketed {
+            left: left.to_string(),
+            right: right.to_string(),
+        },
+        RangeType::Quote(quote) => RangeTargetIntent::Quote {
+            quote: quote.to_string(),
+        },
+        RangeType::XmlTag => RangeTargetIntent::XmlTag,
+        RangeType::Paragraph => RangeTargetIntent::Paragraph,
+        RangeType::Sentence => RangeTargetIntent::Sentence,
+        RangeType::Line => RangeTargetIntent::Line,
+        RangeType::Buffer => RangeTargetIntent::Buffer,
+        RangeType::Item => RangeTargetIntent::Item,
+        _ => RangeTargetIntent::Sentence, // unreachable for non_exhaustive
     }
 }
 

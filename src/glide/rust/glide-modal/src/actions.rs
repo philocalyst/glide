@@ -178,9 +178,45 @@ pub enum EditTargetIntent {
         motion: MotionIntent,
         count: u32,
     },
+    /// Text object around the cursor (Stage B): `iw`, `di(`, `ci"`, …
+    Range {
+        range: RangeTargetIntent,
+        inclusive: bool,
+        count: u32,
+    },
     RawDescription {
         description: String,
     },
+}
+
+/// A typed text-object kind, mirroring modalkit's `RangeType`.
+///
+/// Only the variants modalkit actually resolves are surfaced here; `Paragraph`,
+/// `Sentence`, and `XmlTag` are `XXX: implement` in modalkit 0.0.24 but still
+/// carried through so callers can fall back when they arrive.
+///
+/// `char` fields are `String`s because uniffi doesn't support `char` directly;
+/// each holds a single UTF-8 character.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, uniffi::Enum)]
+pub enum RangeTargetIntent {
+    /// `iw` / `aw` — a word (with optional whitespace when inclusive).
+    Word { word_style: WordStyleName },
+    /// `i(` / `a(` — text between matching bracket characters.
+    Bracketed { left: String, right: String },
+    /// `i"` / `a"` — text between matching quote characters.
+    Quote { quote: String },
+    /// `it` / `at` — XML tag block (modalkit stub).
+    XmlTag,
+    /// `ip` / `ap` — paragraph (modalkit stub).
+    Paragraph,
+    /// `is` / `as` — sentence (modalkit stub).
+    Sentence,
+    /// `Line` range (handled by `LineRange`, kept for completeness).
+    Line,
+    /// `Buffer` range.
+    Buffer,
+    /// `Item` range (`ib`-style matching).
+    Item,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, uniffi::Record)]

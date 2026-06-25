@@ -91,7 +91,7 @@ function is_builtin_mode(mode: GlideMode): boolean {
 export interface GlideEditingAction {
   operation: "motion" | "delete" | "change" | "yank" | "replace" | "raw";
   target: {
-    kind: "current-position" | "current-selection" | "line-range" | "motion" | "raw";
+    kind: "current-position" | "current-selection" | "line-range" | "motion" | "range" | "raw";
     motion?:
       | "column"
       | "line-start"
@@ -102,11 +102,26 @@ export interface GlideEditingAction {
       | "word-end"
       | "paragraph-begin"
       | "raw";
+    range?:
+      | "word"
+      | "bracketed"
+      | "quote"
+      | "xml-tag"
+      | "paragraph"
+      | "sentence"
+      | "line"
+      | "buffer"
+      | "item";
     count: number;
     direction?: "previous" | "next";
     wordStyle?: "little" | "big" | "keyword" | "non-alphanumeric";
     wrap?: boolean;
     includeLineBreak?: boolean;
+    inclusive?: boolean;
+    /** Single-character string for `bracketed.left` / `bracketed.right` / `quote.quote`. */
+    left?: string;
+    right?: string;
+    quote?: string;
     description?: string;
   };
 }
@@ -199,14 +214,36 @@ function motion_kind_from_intent(motion: RustGlideModalT.MotionIntent): GlideEdi
 }
 
 /**
+ * Convert a Rust `RangeTargetIntent` into the plain `range` kind string used by
+ * `GlideEditingAction`. Returns `undefined` for variants the content executor
+ * doesn't handle yet.
+ */
+function range_kind_from_intent(range: RustGlideModalT.RangeTargetIntent): GlideEditingAction["target"]["range"] | undefined {
+  if (range instanceof RustGlideModal.RangeTargetIntent.Word) return "word";
+  if (range instanceof RustGlideModal.RangeTargetIntent.Bracketed) return "bracketed";
+  if (range instanceof RustGlideModal.RangeTargetIntent.Quote) return "quote";
+  if (range instanceof RustGlideModal.RangeTargetIntent.XmlTag) return "xml-tag";
+  if (range instanceof RustGlideModal.RangeTargetIntent.Paragraph) return "paragraph";
+  if (range instanceof RustGlideModal.RangeTargetIntent.Sentence) return "sentence";
+  if (range instanceof RustGlideModal.RangeTargetIntent.Line) return "line";
+  if (range instanceof RustGlideModal.RangeTargetIntent.Buffer) return "buffer";
+  if (range instanceof RustGlideModal.RangeTargetIntent.Item) return "item";
+  return undefined;
+}
+
+/**
  * Convert a Rust `EditingActionIntent` into a plain, structured-clone-safe
  * `GlideEditingAction`. Returns `undefined` when the intent doesn't carry a
- * typed descriptor the content executor can consume (Stage A: motions only,
- * `Motion`/`Delete`/`Change`/`Yank` operations); the caller then falls back to
- * the legacy per-key path.
+ * typed descriptor the content executor can consume; the caller then falls
+ * back to the legacy per-key path.
+ *
+ * `pending_operator` resolves modalkit's `Specifier::Contextual` (which shows
+ * up as `RawDescription("contextual")`) to the actual operation (`d`→delete,
+ * `c`→change) when the intent came from an operator-pending key.
  */
 function editing_action_from_intent(
   intent: RustGlideModalT.EditingActionIntent,
+  pending_operator: "d" | "c" | null,
 ): GlideEditingAction | undefined {
   let operation: GlideEditingAction["operation"];
   const op = intent.operation;
@@ -221,13 +258,19 @@ function editing_action_from_intent(
   } else if (op instanceof RustGlideModal.EditorOperationIntent.Replace) {
     operation = "replace";
   } else if (op instanceof RustGlideModal.EditorOperationIntent.RawDescription) {
-    operation = "raw";
+    // modalkit uses `Specifier::Contextual` for operator-pending keys; the
+    // actual operation is the pending operator (`d`/`c`).
+    operation = pending_operator === "d"
+      ? "delete"
+      : pending_operator === "c"
+      ? "change"
+      : "raw";
   } else {
     return undefined;
   }
 
   if (operation === "raw" || operation === "replace") {
-    // Replace isn't routed through the descriptor executor yet — Stage A.
+    // Replace isn't routed through the descriptor executor yet.
     return undefined;
   }
 
@@ -277,6 +320,33 @@ function editing_action_from_intent(
         includeLineBreak: target.includeLineBreak,
       },
     };
+  } else if (target instanceof RustGlideModal.EditTargetIntent.Range) {
+    const range_kind = range_kind_from_intent(target.range);
+    if (range_kind === undefined) {
+      return undefined;
+    }
+
+    const action: GlideEditingAction = {
+      operation,
+      target: {
+        kind: "range",
+        range: range_kind,
+        count: target.count,
+        inclusive: target.inclusive,
+      },
+    };
+
+    const r = target.range;
+    if (r instanceof RustGlideModal.RangeTargetIntent.Word) {
+      action.target.wordStyle = rust_word_style(r.wordStyle);
+    } else if (r instanceof RustGlideModal.RangeTargetIntent.Bracketed) {
+      action.target.left = r.left;
+      action.target.right = r.right;
+    } else if (r instanceof RustGlideModal.RangeTargetIntent.Quote) {
+      action.target.quote = r.quote;
+    }
+
+    return action;
   }
 
   // `CurrentPosition` / `CurrentSelection` / `RawDescription` — Stage A skips
@@ -656,6 +726,26 @@ export class GlideModalEngine {
    * default (i.e. one not present in the TS registry).
    */
   #synthesize_command(result: RustGlideModalT.ResolvedKeyResult): glide.ExcmdValue | null {
+    // When an operator-pending key resolves the operator (e.g. `dw`, `diw`,
+    // `d$`), modalkit emits an `ExecuteEditingAction` intent AND a mode
+    // transition back to normal. The content actor's `execute_motion` handler
+    // applies the action and then performs the mode change itself, so we
+    // synthesize `execute_motion` here (with the typed `editing_action`
+    // attached by `handle_key_event`) rather than a bare `mode_change normal`
+    // that would drop the intent.
+    const has_editing_action = result.browserCommandIntents.some(
+      intent => intent instanceof RustGlideModal.BrowserCommandIntent.ExecuteEditingAction,
+    );
+    const operator = result.operator === RustGlideModal.PendingOperator.Delete
+      ? "d"
+      : result.operator === RustGlideModal.PendingOperator.Change
+      ? "c"
+      : null;
+
+    if (has_editing_action && operator) {
+      return "execute_motion" as glide.ExcmdString;
+    }
+
     if (result.modeTransition) {
       const target = result.modeTransition.nextMode;
       const parts = [`mode_change ${this.#rust_mode_name(target)}`];
@@ -688,8 +778,8 @@ export class GlideModalEngine {
       if (intent instanceof RustGlideModal.BrowserCommandIntent.OpenCommandBar) {
         return "commandline_show";
       }
-      // `InsertText` / `ExecuteEditingAction` intents are handled content-side
-      // (or are plain insert-mode typing) and have no parent excmd.
+      // `InsertText` intents are handled content-side (plain insert-mode
+      // typing) and have no parent excmd.
     }
 
     return null;
@@ -702,12 +792,18 @@ export class GlideModalEngine {
   /**
    * Extract the first `ExecuteEditingAction` intent from a resolved key result
    * and convert it to a plain `GlideEditingAction`. Returns `undefined` when
-   * there's no typed descriptor or it isn't handled by Stage A's executor.
+   * there's no typed descriptor or it isn't handled by the executor.
    */
   #editing_action_from_result(result: RustGlideModalT.ResolvedKeyResult): GlideEditingAction | undefined {
+    const pending_operator: "d" | "c" | null = result.operator === RustGlideModal.PendingOperator.Delete
+      ? "d"
+      : result.operator === RustGlideModal.PendingOperator.Change
+      ? "c"
+      : null;
+
     for (const intent of result.browserCommandIntents) {
       if (intent instanceof RustGlideModal.BrowserCommandIntent.ExecuteEditingAction) {
-        return editing_action_from_intent(intent.editingAction);
+        return editing_action_from_intent(intent.editingAction, pending_operator);
       }
     }
     return undefined;
@@ -785,7 +881,9 @@ export class GlideModalEngine {
     this.set("normal", "u", "undo");
     this.set("normal", "d", "mode_change op-pending --operator=d", { retain_key_display: true });
     this.set("normal", "c", "mode_change op-pending --operator=c", { retain_key_display: true });
-    this.set("op-pending", "iw", "execute_motion");
+    // `iw` is intentionally *not* registered here so modalkit's built-in text
+    // object (`EditTarget::Range(Word(Little))`) flows through as a typed
+    // descriptor and is handled by `editing-actions.mts` (Stage B).
     this.set("op-pending", "h", "execute_motion");
     this.set("op-pending", "j", "execute_motion");
     this.set("op-pending", "k", "execute_motion");

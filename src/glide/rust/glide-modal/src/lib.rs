@@ -10,7 +10,7 @@ mod tests {
     use crate::actions::{
         AutomaticMoveDirection, BrowserCommandIntent, EditTargetIntent, EditingActionIntent,
         EditorOperationIntent, EngineCommand, GlideMode, KeymapDefinition, ModeChangeRequest,
-        MotionDirection, MotionIntent, WordStyleName,
+        MotionDirection, MotionIntent, RangeTargetIntent, WordStyleName,
     };
     use crate::bridge::GlideModalBridge;
 
@@ -151,6 +151,89 @@ mod tests {
                     target: EditTargetIntent::Motion {
                         motion: MotionIntent::LineEnd,
                         count: 0,
+                    },
+                },
+            }]
+        );
+    }
+
+    #[test]
+    fn text_object_inside_word_translates_to_typed_range() {
+        // `diw` should produce a typed Range(Word(Little)) target. The JS
+        // op-pending `iw` registration preempts modalkit's built-in, so clear
+        // the buffer first to exercise the modalkit-native path.
+        let bridge = GlideModalBridge::default();
+        bridge.clear_buffer();
+        let _ = bridge.resolve_key_notation("d".into());
+        let _ = bridge.resolve_key_notation("i".into());
+        let result = bridge.resolve_key_notation("w".into());
+
+        assert_eq!(
+            result.browser_command_intents,
+            vec![BrowserCommandIntent::ExecuteEditingAction {
+                editing_action: EditingActionIntent {
+                    operation: EditorOperationIntent::RawDescription {
+                        description: "contextual".into(),
+                    },
+                    target: EditTargetIntent::Range {
+                        range: RangeTargetIntent::Word {
+                            word_style: WordStyleName::Little,
+                        },
+                        inclusive: true,
+                        count: 1,
+                    },
+                },
+            }]
+        );
+    }
+
+    #[test]
+    fn text_object_inside_parens_translates_to_typed_range() {
+        let bridge = GlideModalBridge::default();
+        bridge.clear_buffer();
+        let _ = bridge.resolve_key_notation("d".into());
+        let _ = bridge.resolve_key_notation("i".into());
+        let result = bridge.resolve_key_notation("(".into());
+
+        assert_eq!(
+            result.browser_command_intents,
+            vec![BrowserCommandIntent::ExecuteEditingAction {
+                editing_action: EditingActionIntent {
+                    operation: EditorOperationIntent::RawDescription {
+                        description: "contextual".into(),
+                    },
+                    target: EditTargetIntent::Range {
+                        range: RangeTargetIntent::Bracketed {
+                            left: "(".into(),
+                            right: ")".into(),
+                        },
+                        inclusive: false,
+                        count: 1,
+                    },
+                },
+            }]
+        );
+    }
+
+    #[test]
+    fn text_object_around_quotes_translates_to_typed_range() {
+        let bridge = GlideModalBridge::default();
+        bridge.clear_buffer();
+        let _ = bridge.resolve_key_notation("d".into());
+        let _ = bridge.resolve_key_notation("a".into());
+        let result = bridge.resolve_key_notation("\"".into());
+
+        assert_eq!(
+            result.browser_command_intents,
+            vec![BrowserCommandIntent::ExecuteEditingAction {
+                editing_action: EditingActionIntent {
+                    operation: EditorOperationIntent::RawDescription {
+                        description: "contextual".into(),
+                    },
+                    target: EditTargetIntent::Range {
+                        range: RangeTargetIntent::Quote { quote: "\"".into() },
+                        inclusive: true,
+                        count: 1,
                     },
                 },
             }]

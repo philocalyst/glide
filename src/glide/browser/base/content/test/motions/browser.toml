@@ -22,3 +22,6 @@ https_first_disabled = true
 
 ["dist/browser_counts.js"]
 https_first_disabled = true
+
+["dist/browser_text_objects_describe.js"]
+https_first_disabled = true

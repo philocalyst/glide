@@ -126,9 +126,10 @@ add_task(async function test_legacy_fallback_still_works() {
       text_start: 0,
     });
 
-    // `iw` is a text object (Stage B) — it should still work via the fallback.
-    await set_text("Hello world", "diw still works via fallback");
-    await set_selection(2, "l");
-    await test_edit("diw", " world", 0, " ");
+    // `dh` is a simple operator+char-motion that goes through the descriptor
+    // path — verify it still works after the Stage B refactor.
+    await set_text("Hello world", "dh deletes one char");
+    await set_selection(0, "H");
+    await test_edit("dh", "ello world", 0, "e");
   });
 });

@@ -143,6 +143,12 @@ export namespace EditTargetIntent {
     count: number;
     constructor(fields: { motion: MotionIntent; count: number });
   }
+  export class Range {
+    range: RangeTargetIntent;
+    inclusive: boolean;
+    count: number;
+    constructor(fields: { range: RangeTargetIntent; inclusive: boolean; count: number });
+  }
   export class RawDescription {
     description: string;
     constructor(fields: { description: string });
@@ -153,7 +159,40 @@ export type EditTargetIntent =
   | EditTargetIntent.CurrentSelection
   | EditTargetIntent.LineRange
   | EditTargetIntent.Motion
+  | EditTargetIntent.Range
   | EditTargetIntent.RawDescription;
+
+export namespace RangeTargetIntent {
+  export class Word {
+    wordStyle: WordStyleName;
+    constructor(fields: { wordStyle: WordStyleName });
+  }
+  export class Bracketed {
+    left: string;
+    right: string;
+    constructor(fields: { left: string; right: string });
+  }
+  export class Quote {
+    quote: string;
+    constructor(fields: { quote: string });
+  }
+  export class XmlTag {}
+  export class Paragraph {}
+  export class Sentence {}
+  export class Line {}
+  export class Buffer {}
+  export class Item {}
+}
+export type RangeTargetIntent =
+  | RangeTargetIntent.Word
+  | RangeTargetIntent.Bracketed
+  | RangeTargetIntent.Quote
+  | RangeTargetIntent.XmlTag
+  | RangeTargetIntent.Paragraph
+  | RangeTargetIntent.Sentence
+  | RangeTargetIntent.Line
+  | RangeTargetIntent.Buffer
+  | RangeTargetIntent.Item;
 
 export namespace BrowserCommandIntent {
   export class ExecuteBrowserCommand {
