@@ -1,0 +1,5 @@
+diff --git a/toolkit/components/uniffi-bindgen-gecko-js/components/moz.build b/toolkit/components/uniffi-bindgen-gecko-js/components/moz.build
+--- a/toolkit/components/uniffi-bindgen-gecko-js/components/moz.build
++++ b/toolkit/components/uniffi-bindgen-gecko-js/components/moz.build
+@@
++    "generated/RustGlideModal.sys.mjs",
