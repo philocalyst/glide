@@ -332,8 +332,6 @@ declare namespace MockedExports {
     "chrome://glide/content/browser-api.mjs": typeof import("../src/glide/browser/base/content/browser-api.mts");
     "chrome://glide/content/browser-dev.mjs": typeof import("../src/glide/browser/base/content/browser-dev.mts");
     "chrome://glide/content/modal-engine.mjs": typeof import("../src/glide/browser/base/content/modal-engine.mts");
-    "chrome://glide/content/content-motion-adapter.mjs":
-      typeof import("../src/glide/browser/base/content/content-motion-adapter.mts");
     "moz-src:///toolkit/components/uniffi-bindgen-gecko-js/components/generated/RustGlideModal.sys.mjs":
       typeof import("../src/glide/generated/@types/RustGlideModal.d.ts");
     "chrome://glide/content/mode-config.mjs": typeof import("../src/glide/browser/base/content/mode-config.mts");

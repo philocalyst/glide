@@ -157,6 +157,9 @@ text-decoration: none;
 [`glide.fs.mkdir()`](#glide.fs.mkdir)\
 [`glide.messengers`](#glide.messengers)\
 [`glide.messengers.create()`](#glide.messengers.create)\
+[`glide.modes`](#glide.modes)\
+[`glide.modes.register()`](#glide.modes.register)\
+[`glide.modes.list()`](#glide.modes.list)\
 [`glide.SpawnOptions`](#glide.SpawnOptions)\
 [`glide.Process`](#glide.Process)\
 [`glide.ProcessReadStream`](#glide.ProcessReadStream)\
@@ -1290,23 +1293,30 @@ glide.keymaps.set("normal", "gt", ({ tab_id }) => {
 });
 ```
 
-## • `GlideMode`
+## • `glide.modes` {% id="glide.modes" %}
 
-Glide now exposes a fixed set of built-in modes:
+{% api-heading id="glide.modes.register" %}
+glide.modes.register(mode, opts): void
+{% /api-heading %}
+
+Register a custom `mode`.
+
+**note**: you must _also_ register it as a type like so:
 
 ```typescript
-type GlideMode =
-  | "normal"
-  | "insert"
-  | "visual"
-  | "ignore"
-  | "command"
-  | "op-pending"
-  | "hint";
+declare global {
+  interface GlideModes {
+    leap: "leap";
+  }
+}
+glide.modes.register("leap", { caret: "block" });
 ```
 
-Custom mode registration is no longer supported. Express custom behavior with
-keymaps and commands instead.
+{% api-heading id="glide.modes.list" %}
+glide.modes.list(): GlideMode[]
+{% /api-heading %}
+
+List all registered modes (built-in and custom).
 
 # `Types` {% id="types" style="margin-top: 3em !important" %}
 

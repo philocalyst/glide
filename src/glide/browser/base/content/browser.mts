@@ -1384,6 +1384,14 @@ class GlideBrowserClass {
     this.state.mode = new_mode;
     this.state.operator = props?.operator ?? null;
 
+    // Keep the modal engine in sync when the change originates outside the key
+    // pipeline (excmd-driven `mode_change`, custom modes, sandbox). When the
+    // engine already resolved the change itself (e.g. `i`, `d`) its mode matches
+    // and we skip re-setting it to avoid clobbering a pending sequence.
+    if (this.key_manager.current_mode !== new_mode) {
+      this.key_manager.set_mode(new_mode);
+    }
+
     Services.prefs.setIntPref("glide.caret.style", this.key_manager.mode_to_style_enum(new_mode));
 
     for (const listener of this.state_listeners) {

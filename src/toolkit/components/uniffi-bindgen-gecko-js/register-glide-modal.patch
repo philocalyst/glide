@@ -1,0 +1,21 @@
+diff --git a/toolkit/components/uniffi-bindgen-gecko-js/components/Cargo.toml b/toolkit/components/uniffi-bindgen-gecko-js/components/Cargo.toml
+--- a/toolkit/components/uniffi-bindgen-gecko-js/components/Cargo.toml
++++ b/toolkit/components/uniffi-bindgen-gecko-js/components/Cargo.toml
+@@
++glide_modal = { path = "../../../../glide/rust/glide-modal" }
+diff --git a/toolkit/components/uniffi-bindgen-gecko-js/components/lib.rs b/toolkit/components/uniffi-bindgen-gecko-js/components/lib.rs
+--- a/toolkit/components/uniffi-bindgen-gecko-js/components/lib.rs
++++ b/toolkit/components/uniffi-bindgen-gecko-js/components/lib.rs
+@@
++pub use glide_modal;
+diff --git a/toolkit/components/uniffi-bindgen-gecko-js/config.toml b/toolkit/components/uniffi-bindgen-gecko-js/config.toml
+--- a/toolkit/components/uniffi-bindgen-gecko-js/config.toml
++++ b/toolkit/components/uniffi-bindgen-gecko-js/config.toml
+@@
++[glide_modal]
++ffi_module_name = "GlideModal"
+diff --git a/toolkit/components/uniffi-bindgen-gecko-js/components/moz.build b/toolkit/components/uniffi-bindgen-gecko-js/components/moz.build
+--- a/toolkit/components/uniffi-bindgen-gecko-js/components/moz.build
++++ b/toolkit/components/uniffi-bindgen-gecko-js/components/moz.build
+@@
++    "generated/RustGlideModal.sys.mjs",

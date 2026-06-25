@@ -1099,19 +1099,67 @@ declare global {
       ): glide.ParentMessenger<Messages>;
     };
 
+    modes: {
+      /**
+       * Register a custom `mode`.
+       *
+       * **note**: you must *also* register it as a type like so:
+       *
+       * ```typescript
+       * declare global {
+       *   interface GlideModes {
+       *     leap: "leap";
+       *   }
+       * }
+       * glide.modes.register('leap', { caret: 'block' })
+       * ```
+       */
+      register<Mode extends keyof GlideModes>(
+        mode: Mode,
+        opts: { caret: "block" | "line" | "underline" },
+      ): void;
+
+      /**
+       * List all registered modes (built-in and custom).
+       */
+      list(): GlideMode[];
+    };
   };
 
   /**
-   * All built-in modes supported by Glide.
+   * Defines all the supported modes.
+   *
+   * The built-in modes are declared here; custom modes are added by extending
+   * this interface and registering them at runtime:
+   *
+   * ```typescript
+   * declare global {
+   *   interface GlideModes {
+   *     leap: "leap";
+   *   }
+   * }
+   * glide.modes.register('leap', { caret: 'block' })
+   * ```
+   *
+   * **note**: the key is what defines the set of supported modes; the value is
+   *           currently unused.
    */
-  type GlideMode =
-    | "normal"
-    | "insert"
-    | "visual"
-    | "ignore"
-    | "command"
-    | "op-pending"
-    | "hint";
+  interface GlideModes {
+    normal: "normal";
+    insert: "insert";
+    visual: "visual";
+    ignore: "ignore";
+    command: "command";
+    "op-pending": "op-pending";
+    hint: "hint";
+  }
+
+  /**
+   * All of the supported modes.
+   *
+   * See {@link GlideModes} for more information.
+   */
+  type GlideMode = keyof GlideModes;
 
   interface GlideGlobals {
     /**

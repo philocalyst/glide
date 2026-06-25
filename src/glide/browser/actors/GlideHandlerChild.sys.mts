@@ -10,7 +10,6 @@ import type { ToDeserialisedIPCFunction } from "../base/content/utils/ipc.mts";
 import type { ParentMessages, ParentQueries } from "./GlideHandlerParent.sys.mjs";
 
 const hinting = ChromeUtils.importESModule("chrome://glide/content/hinting.mjs");
-const MotionAdapter = ChromeUtils.importESModule("chrome://glide/content/content-motion-adapter.mjs");
 const motions = ChromeUtils.importESModule("chrome://glide/content/motions.mjs");
 const MozUtils = ChromeUtils.importESModule("chrome://glide/content/utils/moz.mjs");
 const { GLIDE_COMMANDLINE_INPUT_ANONID } = ChromeUtils.importESModule("chrome://glide/content/browser-constants.mjs");
@@ -473,23 +472,16 @@ export class GlideHandlerChild extends JSWindowActorChild<
 
         switch (operator) {
           case "d": {
-            const handled_by_motion_adapter = MotionAdapter.execute_operator_motion_plan(
-              editor,
-              sequence,
-              operator,
-            );
-            if (!handled_by_motion_adapter) {
-              const result = motions.select_motion(editor, sequence as any, this.state?.mode ?? "normal", operator);
+            const result = motions.select_motion(editor, sequence as any, this.state?.mode ?? "normal", operator);
 
-              // if the motion didn't actually select anything, then there's
-              // nothing for us to delete
-              if (!editor.selection.isCollapsed) {
-                motions.delete_selection(editor, true);
-              }
+            // if the motion didn't actually select anything, then there's
+            // nothing for us to delete
+            if (!editor.selection.isCollapsed) {
+              motions.delete_selection(editor, true);
+            }
 
-              if (result?.fixup_deletion) {
-                result.fixup_deletion();
-              }
+            if (result?.fixup_deletion) {
+              result.fixup_deletion();
             }
 
             this.#record_repeatable_command({ ...props, operator });
@@ -497,15 +489,8 @@ export class GlideHandlerChild extends JSWindowActorChild<
             break;
           }
           case "c": {
-            const handled_by_motion_adapter = MotionAdapter.execute_operator_motion_plan(
-              editor,
-              sequence,
-              operator,
-            );
-            if (!handled_by_motion_adapter) {
-              motions.select_motion(editor, sequence as any, this.state?.mode ?? "normal", operator);
-              motions.delete_selection(editor, false);
-            }
+            motions.select_motion(editor, sequence as any, this.state?.mode ?? "normal", operator);
+            motions.delete_selection(editor, false);
 
             this.#record_repeatable_command({ ...props, operator });
             this.#change_mode("insert");
@@ -535,9 +520,6 @@ export class GlideHandlerChild extends JSWindowActorChild<
         }
 
         const editor = this.#expect_editor(keyseq);
-        if (MotionAdapter.execute_direct_motion_plan(editor, keyseq, this.state?.mode)) {
-          break;
-        }
 
         switch (keyseq) {
           case "w": {

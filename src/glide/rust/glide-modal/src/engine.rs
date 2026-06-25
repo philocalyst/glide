@@ -15,9 +15,7 @@ use crate::actions::{
     KeySequence, KeymapDefinition, ModeTransition, MotionDirection, MotionIntent,
     PendingSequenceDisplay, ResolvedKeyResult, WordStyleName,
 };
-use crate::bindings::{
-    build_modal_machine, default_keymaps, from_modalkit_mode, is_displayable_partial_match,
-};
+use crate::bindings::{build_modal_machine, from_modalkit_mode, is_displayable_partial_match};
 
 pub struct GlideModalEngine {
     modal_machine: VimMachine<TerminalKey, GlideApplicationInfo>,
@@ -72,9 +70,9 @@ impl GlideModalEngine {
     }
 
     pub fn list_mappings(&self, mode: GlideMode) -> Vec<KeymapDefinition> {
-        default_keymaps()
-            .into_iter()
-            .chain(self.custom_keymaps.iter().cloned())
+        self.custom_keymaps
+            .iter()
+            .cloned()
             .filter(|keymap_definition| keymap_definition.mode == mode)
             .collect()
     }
@@ -197,7 +195,6 @@ impl GlideModalEngine {
         self.custom_keymaps
             .iter()
             .cloned()
-            .chain(default_keymaps())
             .filter(|keymap_definition| keymap_definition.mode == mode)
             .collect()
     }

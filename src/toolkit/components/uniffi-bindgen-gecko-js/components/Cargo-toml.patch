@@ -1,5 +1,0 @@
-diff --git a/toolkit/components/uniffi-bindgen-gecko-js/components/Cargo.toml b/toolkit/components/uniffi-bindgen-gecko-js/components/Cargo.toml
---- a/toolkit/components/uniffi-bindgen-gecko-js/components/Cargo.toml
-+++ b/toolkit/components/uniffi-bindgen-gecko-js/components/Cargo.toml
-@@
-+glide_modal = { path = "../../../../glide/rust/glide-modal" }

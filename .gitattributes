@@ -1,1 +1,8 @@
 * text=auto eol=lf
+
+# Force TypeScript/JS sources to be treated as text so an accidental control
+# byte (e.g. a raw NUL used as a delimiter) can't flip `text=auto` into binary
+# mode and make the file undiffable/unreviewable.
+*.ts  text eol=lf
+*.mts text eol=lf
+*.mjs text eol=lf

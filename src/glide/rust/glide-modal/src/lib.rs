@@ -1,7 +1,6 @@
 pub mod actions;
 pub mod bindings;
 pub mod bridge;
-pub mod editing;
 pub mod engine;
 
 uniffi::setup_scaffolding!();
@@ -10,162 +9,59 @@ uniffi::setup_scaffolding!();
 mod tests {
     use crate::actions::{
         AutomaticMoveDirection, BrowserCommandIntent, EditTargetIntent, EditingActionIntent,
-        EditorOperationIntent, EngineCommand, GlideMode, KeymapDefinition, MotionDirection,
-        MotionIntent, WordStyleName,
+        EditorOperationIntent, EngineCommand, GlideMode, KeymapDefinition, ModeChangeRequest,
+        MotionDirection, MotionIntent, WordStyleName,
     };
     use crate::bridge::GlideModalBridge;
-    use crate::editing::{
-        scalar_offset_to_utf16_offset, utf16_offset_to_scalar_offset, EditInstruction,
-        EditPlanBehavior, EditorSelectionSnapshot, EditorSnapshot, MotionKind,
-    };
 
-    #[test]
-    fn utf16_offsets_round_trip_for_unicode_text() {
-        let text = "a😀z";
-        let scalar_offset = utf16_offset_to_scalar_offset(text, 3);
-        assert_eq!(scalar_offset, 2);
-        assert_eq!(scalar_offset_to_utf16_offset(text, scalar_offset), 3);
-    }
-
-    #[test]
-    fn inner_word_selects_unicode_word_boundaries() {
-        let bridge = GlideModalBridge::default();
-        let snapshot = EditorSnapshot {
-            text: "hello 世界 there".into(),
-            selection: EditorSelectionSnapshot {
-                anchor_scalar_offset: 7,
-                focus_scalar_offset: 7,
-                is_collapsed: true,
+    /// Build a `DispatchBrowserCommand` keymap, mirroring how the JS layer
+    /// registers Glide's default bindings via `glide.keymaps.set`.
+    fn dispatch_keymap(mode: GlideMode, sequence: &[&str], command_name: &str) -> KeymapDefinition {
+        KeymapDefinition {
+            mode,
+            sequence: sequence.iter().map(|key| key.to_string()).collect(),
+            command: EngineCommand::DispatchBrowserCommand {
+                command_name: command_name.into(),
+                arguments: vec![],
+                is_repeatable: false,
             },
-        };
-
-        let plan = bridge
-            .make_edit_plan(
-                snapshot,
-                MotionKind::InnerWord,
-                EditPlanBehavior::MoveCaret,
-            )
-            .unwrap();
-        assert_eq!(
-            plan.instructions,
-            vec![EditInstruction::SelectRange {
-                anchor_scalar_offset: 7,
-                focus_scalar_offset: 8,
-            }]
-        );
+            retain_key_display: false,
+            buffer: false,
+            description: None,
+        }
     }
 
-    #[test]
-    fn delete_line_selects_trailing_newline_when_present() {
-        let bridge = GlideModalBridge::default();
-        let snapshot = EditorSnapshot {
-            text: "hello\nworld".into(),
-            selection: EditorSelectionSnapshot {
-                anchor_scalar_offset: 1,
-                focus_scalar_offset: 1,
-                is_collapsed: true,
+    /// Build a `ChangeMode` keymap, mirroring a JS-registered `mode_change …`.
+    fn change_mode_keymap(
+        mode: GlideMode,
+        sequence: &[&str],
+        target_mode: GlideMode,
+    ) -> KeymapDefinition {
+        KeymapDefinition {
+            mode,
+            sequence: sequence.iter().map(|key| key.to_string()).collect(),
+            command: EngineCommand::ChangeMode {
+                request: ModeChangeRequest {
+                    target_mode,
+                    pending_operator: None,
+                    automatic_move_direction: None,
+                },
             },
-        };
-
-        let plan = bridge
-            .make_edit_plan(
-                snapshot,
-                MotionKind::DeleteLine,
-                EditPlanBehavior::ExtendSelectionFromFocus,
-            )
-            .unwrap();
-        assert_eq!(
-            plan.instructions,
-            vec![EditInstruction::SelectRange {
-                anchor_scalar_offset: 1,
-                focus_scalar_offset: 6,
-            }]
-        );
+            retain_key_display: false,
+            buffer: false,
+            description: None,
+        }
     }
 
     #[test]
-    fn downward_motion_preserves_visual_column() {
+    fn registered_insert_escape_mapping_resolves() {
         let bridge = GlideModalBridge::default();
-        let snapshot = EditorSnapshot {
-            text: "hello\nw\nworld".into(),
-            selection: EditorSelectionSnapshot {
-                anchor_scalar_offset: 4,
-                focus_scalar_offset: 4,
-                is_collapsed: true,
-            },
-        };
+        bridge.set_keymap(change_mode_keymap(
+            GlideMode::Insert,
+            &["j", "j"],
+            GlideMode::Normal,
+        ));
 
-        let plan = bridge
-            .make_edit_plan(snapshot, MotionKind::Down, EditPlanBehavior::MoveCaret)
-            .unwrap();
-        assert_eq!(
-            plan.instructions,
-            vec![EditInstruction::SelectRange {
-                anchor_scalar_offset: 7,
-                focus_scalar_offset: 7,
-            }]
-        );
-    }
-
-    #[test]
-    fn operator_motion_extends_selection_from_focus() {
-        let bridge = GlideModalBridge::default();
-        let snapshot = EditorSnapshot {
-            text: "alpha beta".into(),
-            selection: EditorSelectionSnapshot {
-                anchor_scalar_offset: 2,
-                focus_scalar_offset: 2,
-                is_collapsed: true,
-            },
-        };
-
-        let plan = bridge
-            .make_edit_plan(
-                snapshot,
-                MotionKind::WordForward,
-                EditPlanBehavior::ExtendSelectionFromFocus,
-            )
-            .unwrap();
-        assert_eq!(
-            plan.instructions,
-            vec![EditInstruction::SelectRange {
-                anchor_scalar_offset: 2,
-                focus_scalar_offset: 6,
-            }]
-        );
-    }
-
-    #[test]
-    fn open_line_below_produces_insert_instruction() {
-        let bridge = GlideModalBridge::default();
-        let snapshot = EditorSnapshot {
-            text: "alpha\nbeta".into(),
-            selection: EditorSelectionSnapshot {
-                anchor_scalar_offset: 1,
-                focus_scalar_offset: 1,
-                is_collapsed: true,
-            },
-        };
-
-        let plan = bridge
-            .make_edit_plan(
-                snapshot,
-                MotionKind::OpenLineBelow,
-                EditPlanBehavior::MoveCaret,
-            )
-            .unwrap();
-        assert_eq!(
-            plan.instructions,
-            vec![EditInstruction::InsertText {
-                scalar_offset: 5,
-                text: "\n".into(),
-            }]
-        );
-    }
-
-    #[test]
-    fn default_engine_supports_insert_escape_mapping() {
-        let bridge = GlideModalBridge::default();
         let _ = bridge.resolve_key_notation("i".into());
         let first = bridge.resolve_key_notation("j".into());
         assert!(first.has_partial_match);
@@ -255,6 +151,12 @@ mod tests {
     #[test]
     fn unmatched_key_replays_pending_insert_text_and_clears_partial_sequence_display() {
         let bridge = GlideModalBridge::default();
+        bridge.set_keymap(change_mode_keymap(
+            GlideMode::Insert,
+            &["j", "j"],
+            GlideMode::Normal,
+        ));
+
         let _ = bridge.resolve_key_notation("i".into());
         let first = bridge.resolve_key_notation("j".into());
         assert!(first.has_partial_match);
@@ -273,8 +175,11 @@ mod tests {
     }
 
     #[test]
-    fn list_keymaps_includes_default_mappings() {
+    fn list_keymaps_returns_registered_mappings() {
         let bridge = GlideModalBridge::default();
+        bridge.set_keymap(dispatch_keymap(GlideMode::Normal, &["g", "g"], "scroll_top"));
+        bridge.set_keymap(dispatch_keymap(GlideMode::Normal, &["G"], "scroll_bottom"));
+
         let normal_mappings = bridge.list_keymaps(GlideMode::Normal);
 
         assert!(normal_mappings
@@ -285,7 +190,7 @@ mod tests {
                 .map(String::as_str)
                 .collect::<Vec<_>>()
                 .as_slice()
-                == ["i"]));
+                == ["g", "g"]));
         assert!(normal_mappings
             .iter()
             .any(|keymap_definition| keymap_definition
@@ -294,7 +199,7 @@ mod tests {
                 .map(String::as_str)
                 .collect::<Vec<_>>()
                 .as_slice()
-                == ["."]));
+                == ["G"]));
     }
 
     #[test]
@@ -349,8 +254,10 @@ mod tests {
     }
 
     #[test]
-    fn command_bar_entry_opens_with_colon_prefix() {
+    fn registered_colon_mapping_overrides_native_command_bar() {
         let bridge = GlideModalBridge::default();
+        bridge.set_keymap(dispatch_keymap(GlideMode::Normal, &[":"], "commandline_show"));
+
         let resolved = bridge.resolve_key_notation(":".into());
 
         assert_eq!(
@@ -363,8 +270,10 @@ mod tests {
     }
 
     #[test]
-    fn builtin_scroll_overlay_dispatches_scroll_command() {
+    fn registered_scroll_mapping_dispatches_scroll_command() {
         let bridge = GlideModalBridge::default();
+        bridge.set_keymap(dispatch_keymap(GlideMode::Normal, &["g", "g"], "scroll_top"));
+
         let first = bridge.resolve_key_notation("g".into());
         assert!(first.has_partial_match);
 

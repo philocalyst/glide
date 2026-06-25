@@ -349,7 +349,7 @@ Thanks to [@peff](https://github.com/peff) for the contribution!
 
 - Bumped Firefox from 146.0b9 to 147.0b3
 - Added support for nested [`glide.unstable.include()`](api.md#glide.unstable.include) calls
-- Added a fixed built-in `GlideMode` set for the modalkit-backed modal engine
+- Moved the modal state machine to a modalkit-backed Rust engine, keeping [`glide.modes.register()`](api.md#glide.modes.register) / [`glide.modes.list()`](api.md#glide.modes.list)
 - Added [`glide.commandline.is_active()`](api.md#glide.commandline.is_active)
 - Added support for overriding commandline custom option matching so you can bring your own fuzzy finder
 - Added `<CR>` keymapping to accept the hint with typed label

@@ -1,5 +1,0 @@
-diff --git a/toolkit/components/uniffi-bindgen-gecko-js/components/lib.rs b/toolkit/components/uniffi-bindgen-gecko-js/components/lib.rs
---- a/toolkit/components/uniffi-bindgen-gecko-js/components/lib.rs
-+++ b/toolkit/components/uniffi-bindgen-gecko-js/components/lib.rs
-@@
-+pub use glide_modal;

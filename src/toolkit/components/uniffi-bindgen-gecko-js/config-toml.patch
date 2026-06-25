@@ -1,6 +1,0 @@
-diff --git a/toolkit/components/uniffi-bindgen-gecko-js/config.toml b/toolkit/components/uniffi-bindgen-gecko-js/config.toml
---- a/toolkit/components/uniffi-bindgen-gecko-js/config.toml
-+++ b/toolkit/components/uniffi-bindgen-gecko-js/config.toml
-@@
-+[glide_modal]
-+ffi_module_name = "GlideModal"

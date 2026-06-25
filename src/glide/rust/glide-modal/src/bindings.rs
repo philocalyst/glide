@@ -6,38 +6,9 @@ use modalkit::key::TerminalKey;
 use modalkit::keybindings::{EdgeEvent, EdgeRepeat};
 
 use crate::actions::{
-    AutomaticMoveDirection, EngineCommand, GlideApplicationAction, GlideApplicationInfo, GlideMode,
-    KeySequence, KeymapDefinition, ModeChangeRequest,
+    EngineCommand, GlideApplicationAction, GlideApplicationInfo, GlideMode, KeySequence,
+    KeymapDefinition,
 };
-
-/// Build a [`KeymapDefinition`] for a built-in/default mapping (never buffer-local).
-fn builtin_keymap(
-    mode: GlideMode,
-    sequence: Vec<String>,
-    command: EngineCommand,
-    retain_key_display: bool,
-) -> KeymapDefinition {
-    KeymapDefinition {
-        mode,
-        sequence,
-        command,
-        retain_key_display,
-        buffer: false,
-        description: None,
-    }
-}
-
-pub fn builtin_mode_names() -> Vec<&'static str> {
-    vec![
-        "normal",
-        "insert",
-        "visual",
-        "op-pending",
-        "ignore",
-        "command",
-        "hint",
-    ]
-}
 
 pub fn to_modalkit_mode(mode: GlideMode) -> VimMode {
     match mode {
@@ -62,90 +33,19 @@ pub fn from_modalkit_mode(mode: VimMode) -> GlideMode {
     }
 }
 
-fn change_mode_keymap(
-    mode: GlideMode,
-    sequence: &[&str],
-    target_mode: GlideMode,
-    automatic_move_direction: Option<AutomaticMoveDirection>,
-    retain_key_display: bool,
-) -> KeymapDefinition {
-    builtin_keymap(
-        mode,
-        sequence.iter().map(|key| key.to_string()).collect(),
-        EngineCommand::ChangeMode {
-            request: ModeChangeRequest {
-                target_mode,
-                pending_operator: None,
-                automatic_move_direction,
-            },
-        },
-        retain_key_display,
-    )
-}
-
-fn dispatch_keymap(mode: GlideMode, sequence: &[&str], command_name: &str) -> KeymapDefinition {
-    builtin_keymap(
-        mode,
-        sequence.iter().map(|key| key.to_string()).collect(),
-        EngineCommand::DispatchBrowserCommand {
-            command_name: command_name.to_string(),
-            arguments: Vec::new(),
-            is_repeatable: false,
-        },
-        false,
-    )
-}
-
-pub fn default_keymaps() -> Vec<KeymapDefinition> {
-    vec![
-        change_mode_keymap(
-            GlideMode::Normal,
-            &["i"],
-            GlideMode::Insert,
-            Some(AutomaticMoveDirection::Left),
-            false,
-        ),
-        change_mode_keymap(GlideMode::Normal, &["a"], GlideMode::Insert, None, false),
-        change_mode_keymap(
-            GlideMode::Normal,
-            &["A"],
-            GlideMode::Insert,
-            Some(AutomaticMoveDirection::EndOfLine),
-            false,
-        ),
-        change_mode_keymap(GlideMode::Insert, &["j", "j"], GlideMode::Normal, None, false),
-        dispatch_keymap(GlideMode::Normal, &[":"], "commandline_show"),
-        builtin_keymap(
-            GlideMode::Normal,
-            vec![".".into()],
-            EngineCommand::RepeatLastAction,
-            false,
-        ),
-        dispatch_keymap(GlideMode::Normal, &["g", "g"], "scroll_top"),
-        dispatch_keymap(GlideMode::Normal, &["G"], "scroll_bottom"),
-        dispatch_keymap(GlideMode::Normal, &["<C-d>"], "scroll_half_page_down"),
-        dispatch_keymap(GlideMode::Insert, &["<C-d>"], "scroll_half_page_down"),
-        dispatch_keymap(GlideMode::Normal, &["<C-u>"], "scroll_half_page_up"),
-        dispatch_keymap(GlideMode::Insert, &["<C-u>"], "scroll_half_page_up"),
-        change_mode_keymap(
-            GlideMode::Normal,
-            &["d"],
-            GlideMode::OperatorPending,
-            None,
-            true,
-        ),
-        change_mode_keymap(GlideMode::Normal, &["v"], GlideMode::Visual, None, false),
-    ]
-}
-
+/// Build the modalkit machine from modalkit's native vim defaults plus the
+/// caller-supplied (JS-registered) keymaps.
+///
+/// The engine deliberately carries **no** Glide-specific default bindings:
+/// modalkit's `default_vim_keys` supplies the state-machine behaviour
+/// (operator-pending, counts, motions, repeat), and every Glide-specific
+/// binding is registered from JavaScript via `glide.keymaps.set` so that the
+/// default keymap set stays hot-reloadable configuration rather than compiled-in
+/// Rust.
 pub fn build_modal_machine(
     custom_keymaps: &[KeymapDefinition],
 ) -> VimMachine<TerminalKey, GlideApplicationInfo> {
     let mut modal_machine = default_vim_keys::<GlideApplicationInfo>();
-
-    for default_keymap in default_overlay_keymaps() {
-        add_keymap_definition(&mut modal_machine, &default_keymap);
-    }
 
     for custom_keymap in custom_keymaps {
         add_keymap_definition(&mut modal_machine, custom_keymap);
@@ -163,34 +63,14 @@ pub fn is_displayable_partial_match(
         return false;
     }
 
-    default_overlay_keymaps()
-        .into_iter()
-        .chain(custom_keymaps.iter().cloned())
-        .any(|keymap_definition| {
-            keymap_definition.mode == mode
-                && keymap_definition
-                    .sequence
-                    .as_slice()
-                    .starts_with(pending_sequence)
-                && keymap_definition.sequence.len() > pending_sequence.len()
-        })
-}
-
-fn default_overlay_keymaps() -> Vec<KeymapDefinition> {
-    default_keymaps()
-        .into_iter()
-        .filter(|keymap_definition| {
-            matches!(
-                keymap_definition
-                    .sequence
-                    .iter()
-                    .map(String::as_str)
-                    .collect::<Vec<_>>()
-                    .as_slice(),
-                ["j", "j"] | [":"] | ["g", "g"]
-            )
-        })
-        .collect()
+    custom_keymaps.iter().any(|keymap_definition| {
+        keymap_definition.mode == mode
+            && keymap_definition
+                .sequence
+                .as_slice()
+                .starts_with(pending_sequence)
+            && keymap_definition.sequence.len() > pending_sequence.len()
+    })
 }
 
 fn add_keymap_definition(

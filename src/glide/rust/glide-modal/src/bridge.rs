@@ -1,9 +1,6 @@
 use std::sync::Mutex;
 
 use crate::actions::{GlideMode, KeymapDefinition, ResolvedKeyResult};
-use crate::editing::{
-    make_motion_edit_plan, EditPlan, EditPlanBehavior, EditingError, EditorSnapshot, MotionKind,
-};
 use crate::engine::GlideModalEngine;
 
 /// The single authority over Glide's modal state.
@@ -74,14 +71,5 @@ impl GlideModalBridge {
 
     pub fn resolve_key_notation(&self, key_notation: String) -> ResolvedKeyResult {
         self.engine.lock().unwrap().resolve_key_notation(&key_notation)
-    }
-
-    pub fn make_edit_plan(
-        &self,
-        snapshot: EditorSnapshot,
-        motion_kind: MotionKind,
-        behavior: EditPlanBehavior,
-    ) -> Result<EditPlan, EditingError> {
-        make_motion_edit_plan(&snapshot, motion_kind, behavior)
     }
 }

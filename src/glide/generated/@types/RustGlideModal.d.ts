@@ -61,33 +61,6 @@ export enum WordStyleName {
   NonAlphanumeric,
 }
 
-export enum MotionKind {
-  Left,
-  Right,
-  Up,
-  Down,
-  StartOfLine,
-  FirstNonWhitespace,
-  EndOfLine,
-  WordForward,
-  BigWordForward,
-  EndWord,
-  WordBackward,
-  BigWordBackward,
-  ParagraphBackward,
-  ParagraphForward,
-  InnerWord,
-  DeleteLine,
-  Substitute,
-  OpenLineBelow,
-}
-
-export enum EditPlanBehavior {
-  MoveCaret,
-  ExtendSelectionFromFocus,
-  ExtendSelectionFromAnchor,
-}
-
 // ---------------------------------------------------------------------------
 // Data-carrying enums (variant classes discriminated via `instanceof`)
 // ---------------------------------------------------------------------------
@@ -208,28 +181,6 @@ export type EngineCommand =
   | EngineCommand.ChangeMode
   | EngineCommand.DispatchBrowserCommand;
 
-export namespace EditInstruction {
-  export class DeleteRange {
-    startScalarOffset: number;
-    endScalarOffset: number;
-    constructor(fields: { startScalarOffset: number; endScalarOffset: number });
-  }
-  export class SelectRange {
-    anchorScalarOffset: number;
-    focusScalarOffset: number;
-    constructor(fields: { anchorScalarOffset: number; focusScalarOffset: number });
-  }
-  export class InsertText {
-    scalarOffset: number;
-    text: string;
-    constructor(fields: { scalarOffset: number; text: string });
-  }
-}
-export type EditInstruction =
-  | EditInstruction.DeleteRange
-  | EditInstruction.SelectRange
-  | EditInstruction.InsertText;
-
 // ---------------------------------------------------------------------------
 // Records
 // ---------------------------------------------------------------------------
@@ -289,27 +240,6 @@ export class KeymapDefinition {
   });
 }
 
-export class EditorSelectionSnapshot {
-  anchorScalarOffset: number;
-  focusScalarOffset: number;
-  isCollapsed: boolean;
-  constructor(fields: {
-    anchorScalarOffset: number;
-    focusScalarOffset: number;
-    isCollapsed: boolean;
-  });
-}
-
-export class EditorSnapshot {
-  text: string;
-  selection: EditorSelectionSnapshot;
-  constructor(fields: { text: string; selection: EditorSelectionSnapshot });
-}
-
-export class EditPlan {
-  instructions: EditInstruction[];
-}
-
 // ---------------------------------------------------------------------------
 // The interface object — the single authority over Glide's modal state.
 // ---------------------------------------------------------------------------
@@ -332,7 +262,4 @@ export class GlideModalBridge {
   clearBuffer(): void;
 
   resolveKeyNotation(keyNotation: string): ResolvedKeyResult;
-
-  /** @throws on an out-of-bounds selection. */
-  makeEditPlan(snapshot: EditorSnapshot, motionKind: MotionKind, behavior: EditPlanBehavior): EditPlan;
 }
