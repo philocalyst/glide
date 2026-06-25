@@ -31,10 +31,13 @@ export interface Editor {
 }
 
 /**
- * An exhaustive list of all currently supported motion operations.
+ * Fallback motion helpers used by the content-side adapter and tests.
+ *
+ * Supported motions are being moved to the modal edit-plan path; this file now
+ * primarily holds helper functions and legacy fallbacks for motions that have
+ * not yet been ported.
  */
-export const MOTIONS = ["iw", "h", "j", "k", "l", "d"] as const;
-type GlideMotion = (typeof MOTIONS)[number];
+type GlideMotion = "iw" | "h" | "j" | "k" | "l" | "d";
 
 export function select_motion(
   editor: nsIEditor,
