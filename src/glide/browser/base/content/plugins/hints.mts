@@ -16,8 +16,6 @@ import type { Sandbox } from "../sandbox.mts";
 export function init(sandbox: Sandbox) {
   const { glide } = sandbox;
 
-  glide.modes.register("hint", { caret: "block" });
-
   glide.autocmds.create("ModeChanged", "hint:*", async () => {
     // browser dev toolbox pref to inspect hint styling
     // `...` at the top-right then `Disable Popup Auto-Hide`
