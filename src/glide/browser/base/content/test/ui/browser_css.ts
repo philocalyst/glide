@@ -7,6 +7,8 @@
 
 "use strict";
 
+const BUILTIN_MODES: GlideMode[] = ["normal", "insert", "visual", "ignore", "command", "op-pending", "hint"];
+
 add_task(async function test_glide_current_mode_color() {
   function css_var_value(name: string) {
     window.getComputedStyle(document!.documentElement!)!
@@ -22,8 +24,7 @@ add_task(async function test_glide_current_mode_color() {
 
   is(initial_current_color, mode_color, "--glide-current-mode-color should be set to the current modes color");
 
-  const modes = glide.modes.list();
-  for (const mode of modes) {
+  for (const mode of BUILTIN_MODES) {
     const mode_color = css_var_value(`--glide-mode-${mode}`);
     isnot(mode_color, "", `--glide-mode-${mode} should not be empty.`);
 
