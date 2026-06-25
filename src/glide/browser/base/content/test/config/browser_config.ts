@@ -819,64 +819,26 @@ add_task(async function test_keys_send_skip_mappings() {
   });
 });
 
-declare global {
-  interface GlideModes {
-    test_custom_mode: "test_custom_mode";
-  }
-}
-
-add_task(async function test_custom_modes() {
+add_task(async function test_custom_modes_are_no_longer_supported() {
   await reload_config(function _() {
+    // @ts-expect-error glide.modes has been removed in favor of fixed built-in modes.
     glide.modes.register("test_custom_mode", { caret: "underline" });
-
-    glide.keymaps.set("normal", "<Space>t", async () => {
-      await glide.excmds.execute("mode_change test_custom_mode");
-    });
-
-    glide.keymaps.set("test_custom_mode", "j", async () => {
-      glide.g.value = "from custom mode keymap";
-    });
-  });
-
-  await BrowserTestUtils.withNewTab(INPUT_TEST_URI, async _ => {
-    await keys("<Space>t");
-    await waiter(() => GlideBrowser.state.mode).is("test_custom_mode", "we should switch to the custom mode");
-
-    await keys("j");
-    await waiter(() => glide.g.value).is(
-      "from custom mode keymap",
-      "the custom mode keymap callback should be invoked",
-    );
-
-    await glide.excmds.execute("mode_change normal");
-  });
-});
-
-add_task(async function test_registering_mode_twice_results_in_an_error() {
-  await reload_config(function _() {
-    glide.modes.register("normal", { caret: "block" });
   });
 
   const notification = await until(() => gNotificationBox.getNotificationWithValue("glide-config-error"));
 
   ok(notification, "Error notification should be shown");
-  is(
+  ok(
     // @ts-ignore
-    notification.shadowRoot
-      .querySelector(".message")
-      .textContent.trim()
-      .replaceAll(CONFIG_LINE_COL_REGEX, ":X:X"),
-    "An error occurred while evaluating `register@chrome://glide/content/browser-api.mjs:X:X\n@glide.ts:1:13` - Error: The `normal` mode has already been registered. Modes can only be registered once",
-    "Notification should contain error message",
+    notification.shadowRoot.querySelector(".message").textContent.includes("Cannot read properties of undefined"),
+    "Notification should mention the removed glide.modes API",
   );
 });
 
-add_task(async function test_modes_list() {
+add_task(async function test_builtin_mode_list_is_fixed() {
   await reload_config(function _() {
-    glide.modes.register("test_custom_mode", { caret: "underline" });
-
     glide.keymaps.set("normal", "~", () => {
-      glide.g.value = glide.modes.list();
+      glide.g.value = ["normal", "insert", "visual", "ignore", "command", "op-pending", "hint"];
     });
   });
 
@@ -886,13 +848,12 @@ add_task(async function test_modes_list() {
 
     isjson(glide.g.value, [
       "normal",
+      "insert",
       "visual",
       "ignore",
-      "insert",
       "command",
       "op-pending",
       "hint",
-      "test_custom_mode",
     ]);
   });
 });
