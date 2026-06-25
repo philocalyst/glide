@@ -22,7 +22,6 @@ const { human_join } = ChromeUtils.importESModule("chrome://glide/content/utils/
 const { object_assign } = ChromeUtils.importESModule("chrome://glide/content/utils/objects.mjs");
 const { create_sandbox, FileNotFoundError, FileModificationNotAllowedError, GlideProcessError } = ChromeUtils
   .importESModule("chrome://glide/content/sandbox.mjs");
-const { MODE_SCHEMA_TYPE } = ChromeUtils.importESModule("chrome://glide/content/browser-excmds-registry.mjs");
 const { LayoutUtils } = ChromeUtils.importESModule("resource://gre/modules/LayoutUtils.sys.mjs");
 
 declare var document: Document & { documentElement: HTMLElement };
@@ -880,20 +879,6 @@ export function make_glide_api(
         const absolute = resolve_path(path);
         await IOUtils.makeDirectory(absolute, { createAncestors: props?.parents, ignoreExisting: props?.exists_ok })
           .catch((err) => handle_ioutils_error(err, absolute));
-      },
-    },
-    modes: {
-      register(mode, opts) {
-        if (GlideBrowser._modes[mode]) {
-          throw new Error(`The \`${mode}\` mode has already been registered. Modes can only be registered once`);
-        }
-
-        GlideBrowser._modes[mode] = { caret: opts.caret };
-        MODE_SCHEMA_TYPE.enum.push(mode);
-        GlideBrowser.key_manager.register_mode(mode);
-      },
-      list() {
-        return Object.keys(GlideBrowser._modes) as GlideMode[];
       },
     },
     styles: ((): typeof glide["styles"] => {
