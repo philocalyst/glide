@@ -13,6 +13,7 @@ import type { Sandbox } from "./sandbox.mts";
 import type { ExtensionContentFunction } from "./utils/ipc.mts";
 
 const { CONFIG_URI } = ChromeUtils.importESModule("chrome://glide/content/browser-constants.mjs");
+const ModalEngine = ChromeUtils.importESModule("chrome://glide/content/modal-engine.mjs", { global: "current" });
 const { make_glide_api, make_buffer_options, firefox_addon_to_glide } = ChromeUtils.importESModule(
   "chrome://glide/content/browser-api.mjs",
   { global: "current" },
@@ -68,7 +69,7 @@ const DEBOUNCE_MODE_ANIMATION_FRAMES = 3;
 class GlideBrowserClass {
   state_listeners = new Set<StateChangeListener>();
   state = { ..._defaultState };
-  key_manager = new Keys.KeyManager();
+  key_manager = new ModalEngine.GlideModalEngine();
   config_path: string | null = null;
 
   #api: typeof glide | null = null;
@@ -441,7 +442,6 @@ class GlideBrowserClass {
   async #reload_config(all_windows: boolean) {
     this.#api = null;
     this.config_path = null;
-    this._modes = {} as any;
     this.#messengers = new Map();
     this.#user_cmds = new Map();
     this.#sandbox = null;
@@ -493,15 +493,7 @@ class GlideBrowserClass {
 
     this.autocmds = {};
 
-    this.key_manager = new Keys.KeyManager();
-
-    // builtin modes
-    this.api.modes.register("normal", { caret: "block" });
-    this.api.modes.register("visual", { caret: "block" });
-    this.api.modes.register("ignore", { caret: "line" });
-    this.api.modes.register("insert", { caret: "line" });
-    this.api.modes.register("command", { caret: "line" });
-    this.api.modes.register("op-pending", { caret: "underline" });
+    this.key_manager = new ModalEngine.GlideModalEngine();
 
     const sandbox = this.config_sandbox;
 
@@ -1380,29 +1372,8 @@ class GlideBrowserClass {
     return this.state_listeners.delete(cb);
   }
 
-  _modes: { [k in GlideMode]: { caret: "block" | "line" | "underline" } } = {} as any;
-
   get mode_names(): GlideMode[] {
-    return Object.keys(this._modes) as GlideMode[];
-  }
-
-  // must correspond exactly with `src/glide/cpp/Glide.h::GlideCaretStyle`
-  #mode_to_style_enum(mode: GlideMode): number {
-    const cfg = this._modes[mode];
-    if (!cfg) {
-      throw new Error(`Attempting to use a mode \`${mode}\` that hasn't been set with \`glide.modes.register()\` `);
-    }
-
-    switch (cfg.caret) {
-      case "block":
-        return 0;
-      case "underline":
-        return 1;
-      case "line":
-        return 2;
-      default:
-        throw assert_never(cfg.caret);
-    }
+    return this.key_manager.mode_names;
   }
 
   _change_mode(
@@ -1413,7 +1384,7 @@ class GlideBrowserClass {
     this.state.mode = new_mode;
     this.state.operator = props?.operator ?? null;
 
-    Services.prefs.setIntPref("glide.caret.style", this.#mode_to_style_enum(new_mode));
+    Services.prefs.setIntPref("glide.caret.style", this.key_manager.mode_to_style_enum(new_mode));
 
     for (const listener of this.state_listeners) {
       listener(this.state, old_state, props?.meta);
