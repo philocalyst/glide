@@ -1705,7 +1705,10 @@ class GlideBrowserClass {
         sequence: mapping.value.sequence,
         mode,
       });
-      await GlideExcmds.execute(mapping.value.command, { mapping });
+      await GlideExcmds.execute(mapping.value.command, {
+        mapping,
+        editing_action: mapping.value.editing_action,
+      });
     }
 
     return;

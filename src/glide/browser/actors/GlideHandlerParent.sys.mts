@@ -6,6 +6,7 @@
 import type { ContentExcmd, GlideOperator } from "../base/content/browser-excmds-registry.mts";
 import type { State, StateChangeListener, StateChangeMeta } from "../base/content/browser.mjs";
 import type { GlideFunctionIPC } from "../base/content/utils/ipc.mts";
+import type { GlideEditingAction } from "../base/content/modal-engine.mts";
 import type { ChildMessages, ChildQueries } from "./GlideHandlerChild.sys.mjs";
 
 const { assert_never } = ChromeUtils.importESModule("chrome://glide/content/utils/guards.mjs");
@@ -30,6 +31,12 @@ export interface ParentMessages {
     args: string;
     operator: GlideOperator | null;
     sequence: string[];
+    /**
+     * Typed editing-action descriptor (Stage A). When present, the content
+     * process routes through `editing-actions.mts::apply_editing_action`;
+     * otherwise the legacy per-key switch runs unchanged.
+     */
+    editing_action?: GlideEditingAction;
   };
   "Glide::KeyMappingExecution": {
     sequence: string[];

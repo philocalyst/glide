@@ -11,6 +11,7 @@ import type { ParentMessages, ParentQueries } from "./GlideHandlerParent.sys.mjs
 
 const hinting = ChromeUtils.importESModule("chrome://glide/content/hinting.mjs");
 const motions = ChromeUtils.importESModule("chrome://glide/content/motions.mjs");
+const editing_actions = ChromeUtils.importESModule("chrome://glide/content/editing-actions.mjs");
 const MozUtils = ChromeUtils.importESModule("chrome://glide/content/utils/moz.mjs");
 const { GLIDE_COMMANDLINE_INPUT_ANONID } = ChromeUtils.importESModule("chrome://glide/content/browser-constants.mjs");
 const IPC = ChromeUtils.importESModule("chrome://glide/content/utils/ipc.mjs");
@@ -470,6 +471,27 @@ export class GlideHandlerChild extends JSWindowActorChild<
         const sequence = props.sequence.join("");
         const editor = this.#expect_editor(`${operator}${sequence}`);
 
+        // Stage A: if a typed editing-action descriptor is attached, route
+        // through the descriptor-driven executor. It returns `false` for any
+        // action it can't handle yet, in which case we fall back to the legacy
+        // per-key switch below.
+        if (props.editing_action) {
+          const handled = editing_actions.apply_editing_action(editor, props.editing_action, {
+            mode: this.state?.mode ?? "normal",
+            operator,
+          });
+          if (handled) {
+            if (operator === "c") {
+              this.#record_repeatable_command({ ...props, operator });
+              this.#change_mode("insert");
+            } else {
+              this.#record_repeatable_command({ ...props, operator });
+              this.#change_mode("normal");
+            }
+            break;
+          }
+        }
+
         switch (operator) {
           case "d": {
             const result = motions.select_motion(editor, sequence as any, this.state?.mode ?? "normal", operator);
@@ -520,6 +542,23 @@ export class GlideHandlerChild extends JSWindowActorChild<
         }
 
         const editor = this.#expect_editor(keyseq);
+
+        // Stage A: if a typed editing-action descriptor is attached, route
+        // through the descriptor-driven executor (counts, operator×motion).
+        // Falls back to the legacy per-key switch when it returns `false`.
+        if (props.editing_action) {
+          const handled = editing_actions.apply_editing_action(editor, props.editing_action, {
+            mode: this.state?.mode ?? "normal",
+            operator: props.operator ?? this.state?.operator ?? null,
+          });
+          if (handled) {
+            // `change` operations drop into insert mode; motions stay put.
+            if (props.editing_action.operation === "change") {
+              this.#change_mode("insert");
+            }
+            break;
+          }
+        }
 
         switch (keyseq) {
           case "w": {

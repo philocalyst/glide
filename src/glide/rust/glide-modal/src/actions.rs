@@ -126,10 +126,30 @@ pub enum MotionIntent {
         direction: MotionDirection,
         wrap: bool,
     },
+    /// First column of the current line (`0`).
+    LineStart,
+    /// End of the current line (`$`).
     LineEnd,
+    /// First non-blank character of a line (`^`).
+    FirstWord {
+        direction: MotionDirection,
+    },
+    /// Whole-line vertical motion (`j` / `k`).
+    Line {
+        direction: MotionDirection,
+    },
     WordBegin {
         direction: MotionDirection,
         word_style: WordStyleName,
+    },
+    /// End of a word (`e` / `ge`).
+    WordEnd {
+        direction: MotionDirection,
+        word_style: WordStyleName,
+    },
+    /// Paragraph boundary (`{` / `}`).
+    ParagraphBegin {
+        direction: MotionDirection,
     },
     RawDescription {
         description: String,

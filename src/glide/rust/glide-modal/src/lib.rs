@@ -109,6 +109,55 @@ mod tests {
     }
 
     #[test]
+    fn count_prefix_flows_into_motion_target() {
+        let bridge = GlideModalBridge::default();
+        let _ = bridge.resolve_key_notation("3".into());
+        let result = bridge.resolve_key_notation("w".into());
+
+        assert_eq!(
+            result.browser_command_intents,
+            vec![BrowserCommandIntent::ExecuteEditingAction {
+                editing_action: EditingActionIntent {
+                    operation: EditorOperationIntent::RawDescription {
+                        description: "contextual".into(),
+                    },
+                    target: EditTargetIntent::Motion {
+                        motion: MotionIntent::WordBegin {
+                            direction: MotionDirection::Next,
+                            word_style: WordStyleName::Little,
+                        },
+                        count: 3,
+                    },
+                },
+            }]
+        );
+    }
+
+    #[test]
+    fn operator_with_line_end_motion_translates_to_typed_intent() {
+        let bridge = GlideModalBridge::default();
+        let _ = bridge.resolve_key_notation("d".into());
+        let result = bridge.resolve_key_notation("$".into());
+
+        // `$` is `Count::MinusOne` in modalkit (vim: end of line, count-1 lines
+        // down), so a bare `$` resolves to 0 — i.e. the current line's end.
+        assert_eq!(
+            result.browser_command_intents,
+            vec![BrowserCommandIntent::ExecuteEditingAction {
+                editing_action: EditingActionIntent {
+                    operation: EditorOperationIntent::RawDescription {
+                        description: "contextual".into(),
+                    },
+                    target: EditTargetIntent::Motion {
+                        motion: MotionIntent::LineEnd,
+                        count: 0,
+                    },
+                },
+            }]
+        );
+    }
+
+    #[test]
     fn repeat_replays_last_modalkit_edit_sequence() {
         let bridge = GlideModalBridge::default();
         let _ = bridge.resolve_key_notation("d".into());

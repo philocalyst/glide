@@ -78,6 +78,40 @@ function is_builtin_mode(mode: GlideMode): boolean {
 }
 
 /**
+ * Plain, structured-clone-safe representation of a typed editing action, sent
+ * from the parent to the content process alongside `Glide::ExecuteContentCommand`.
+ *
+ * Rust uniffi objects can't cross the IPC boundary, so `modal-engine.mts`
+ * converts the `EditingActionIntent` into this shape before forwarding.
+ *
+ * Stage A only supports motions and the `Motion`/`Delete`/`Change`/`Yank`
+ * operations; text objects (`EditTarget::Range`/`Boundary`) remain on the
+ * `RawDescription` fallback until Stage B.
+ */
+export interface GlideEditingAction {
+  operation: "motion" | "delete" | "change" | "yank" | "replace" | "raw";
+  target: {
+    kind: "current-position" | "current-selection" | "line-range" | "motion" | "raw";
+    motion?:
+      | "column"
+      | "line-start"
+      | "line-end"
+      | "first-word"
+      | "line"
+      | "word-begin"
+      | "word-end"
+      | "paragraph-begin"
+      | "raw";
+    count: number;
+    direction?: "previous" | "next";
+    wordStyle?: "little" | "big" | "keyword" | "non-alphanumeric";
+    wrap?: boolean;
+    includeLineBreak?: boolean;
+    description?: string;
+  };
+}
+
+/**
  * A minimal trie-node-shaped result returned by {@link GlideModalEngine.handle_key_event}.
  *
  * `browser.mts` was written against the previous trie-based `KeyManager` and
@@ -94,6 +128,14 @@ export interface ResolvedMappingNode {
       retain_key_display: boolean;
       deleted: boolean;
       description: string | undefined;
+      /**
+       * Typed editing action descriptor built from the Rust
+       * `ExecuteEditingAction` intent. Forwarded to the content process so the
+       * descriptor-driven executor (`editing-actions.mts`) can apply counts and
+       * operator×motion composition. Absent for commands that have no typed
+       * descriptor (e.g. plain excmds); the legacy per-key path then runs.
+       */
+      editing_action?: GlideEditingAction;
     }
     | null;
 }
@@ -117,6 +159,129 @@ interface ParsedModeChange {
   target: GlideMode;
   automove: "left" | "endline" | null;
   operator: "d" | "c" | null;
+}
+
+function rust_motion_direction(dir: RustGlideModalT.MotionDirection): "previous" | "next" {
+  return dir === RustGlideModal.MotionDirection.Next ? "next" : "previous";
+}
+
+function rust_word_style(style: RustGlideModalT.WordStyleName): GlideEditingAction["target"]["wordStyle"] {
+  switch (style) {
+    case RustGlideModal.WordStyleName.Little:
+      return "little";
+    case RustGlideModal.WordStyleName.Big:
+      return "big";
+    case RustGlideModal.WordStyleName.Keyword:
+      return "keyword";
+    case RustGlideModal.WordStyleName.NonAlphanumeric:
+      return "non-alphanumeric";
+    default:
+      return "little";
+  }
+}
+
+/**
+ * Convert a Rust `MotionIntent` into the plain `motion` kind string used by
+ * `GlideEditingAction`. Returns `undefined` for variants the content executor
+ * doesn't handle yet (Stage A covers the common vim motions).
+ */
+function motion_kind_from_intent(motion: RustGlideModalT.MotionIntent): GlideEditingAction["target"]["motion"] | undefined {
+  if (motion instanceof RustGlideModal.MotionIntent.Column) return "column";
+  if (motion instanceof RustGlideModal.MotionIntent.LineStart) return "line-start";
+  if (motion instanceof RustGlideModal.MotionIntent.LineEnd) return "line-end";
+  if (motion instanceof RustGlideModal.MotionIntent.FirstWord) return "first-word";
+  if (motion instanceof RustGlideModal.MotionIntent.Line) return "line";
+  if (motion instanceof RustGlideModal.MotionIntent.WordBegin) return "word-begin";
+  if (motion instanceof RustGlideModal.MotionIntent.WordEnd) return "word-end";
+  if (motion instanceof RustGlideModal.MotionIntent.ParagraphBegin) return "paragraph-begin";
+  if (motion instanceof RustGlideModal.MotionIntent.RawDescription) return "raw";
+  return undefined;
+}
+
+/**
+ * Convert a Rust `EditingActionIntent` into a plain, structured-clone-safe
+ * `GlideEditingAction`. Returns `undefined` when the intent doesn't carry a
+ * typed descriptor the content executor can consume (Stage A: motions only,
+ * `Motion`/`Delete`/`Change`/`Yank` operations); the caller then falls back to
+ * the legacy per-key path.
+ */
+function editing_action_from_intent(
+  intent: RustGlideModalT.EditingActionIntent,
+): GlideEditingAction | undefined {
+  let operation: GlideEditingAction["operation"];
+  const op = intent.operation;
+  if (op instanceof RustGlideModal.EditorOperationIntent.Motion) {
+    operation = "motion";
+  } else if (op instanceof RustGlideModal.EditorOperationIntent.Delete) {
+    operation = "delete";
+  } else if (op instanceof RustGlideModal.EditorOperationIntent.Change) {
+    operation = "change";
+  } else if (op instanceof RustGlideModal.EditorOperationIntent.Yank) {
+    operation = "yank";
+  } else if (op instanceof RustGlideModal.EditorOperationIntent.Replace) {
+    operation = "replace";
+  } else if (op instanceof RustGlideModal.EditorOperationIntent.RawDescription) {
+    operation = "raw";
+  } else {
+    return undefined;
+  }
+
+  if (operation === "raw" || operation === "replace") {
+    // Replace isn't routed through the descriptor executor yet — Stage A.
+    return undefined;
+  }
+
+  const target = intent.target;
+  if (target instanceof RustGlideModal.EditTargetIntent.Motion) {
+    const motion_kind = motion_kind_from_intent(target.motion);
+    if (motion_kind === undefined || motion_kind === "raw") {
+      return undefined;
+    }
+
+    const action: GlideEditingAction = {
+      operation,
+      target: {
+        kind: "motion",
+        motion: motion_kind,
+        count: target.count,
+      },
+    };
+
+    // Attach variant-specific fields so the executor can pick the right offset
+    // primitive.
+    const m = target.motion;
+    if (m instanceof RustGlideModal.MotionIntent.Column) {
+      action.target.direction = rust_motion_direction(m.direction);
+      action.target.wrap = m.wrap;
+    } else if (m instanceof RustGlideModal.MotionIntent.FirstWord) {
+      action.target.direction = rust_motion_direction(m.direction);
+    } else if (m instanceof RustGlideModal.MotionIntent.Line) {
+      action.target.direction = rust_motion_direction(m.direction);
+    } else if (m instanceof RustGlideModal.MotionIntent.WordBegin) {
+      action.target.direction = rust_motion_direction(m.direction);
+      action.target.wordStyle = rust_word_style(m.wordStyle);
+    } else if (m instanceof RustGlideModal.MotionIntent.WordEnd) {
+      action.target.direction = rust_motion_direction(m.direction);
+      action.target.wordStyle = rust_word_style(m.wordStyle);
+    } else if (m instanceof RustGlideModal.MotionIntent.ParagraphBegin) {
+      action.target.direction = rust_motion_direction(m.direction);
+    }
+
+    return action;
+  } else if (target instanceof RustGlideModal.EditTargetIntent.LineRange) {
+    return {
+      operation,
+      target: {
+        kind: "line-range",
+        count: target.count,
+        includeLineBreak: target.includeLineBreak,
+      },
+    };
+  }
+
+  // `CurrentPosition` / `CurrentSelection` / `RawDescription` — Stage A skips
+  // these; the legacy per-key path handles them where applicable.
+  return undefined;
 }
 
 function parse_mode_change(excmd: string): ParsedModeChange | null {
@@ -369,6 +534,12 @@ export class GlideModalEngine {
       return undefined;
     }
 
+    // Extract a typed editing-action descriptor (if any) from the Rust
+    // `ExecuteEditingAction` intent. The content process uses it to apply
+    // counts and operator×motion composition; when absent the legacy per-key
+    // path runs unchanged.
+    const editing_action = this.#editing_action_from_result(result);
+
     return {
       has_children: false,
       value: {
@@ -377,6 +548,7 @@ export class GlideModalEngine {
         retain_key_display: entry?.retain_key_display ?? this.#synthesize_retain(result),
         deleted: false,
         description: entry?.description,
+        editing_action,
       },
     };
   }
@@ -525,6 +697,20 @@ export class GlideModalEngine {
 
   #synthesize_retain(result: RustGlideModalT.ResolvedKeyResult): boolean {
     return result.modeTransition?.nextMode === RustGlideModal.GlideMode.OperatorPending;
+  }
+
+  /**
+   * Extract the first `ExecuteEditingAction` intent from a resolved key result
+   * and convert it to a plain `GlideEditingAction`. Returns `undefined` when
+   * there's no typed descriptor or it isn't handled by Stage A's executor.
+   */
+  #editing_action_from_result(result: RustGlideModalT.ResolvedKeyResult): GlideEditingAction | undefined {
+    for (const intent of result.browserCommandIntents) {
+      if (intent instanceof RustGlideModal.BrowserCommandIntent.ExecuteEditingAction) {
+        return editing_action_from_intent(intent.editingAction);
+      }
+    }
+    return undefined;
   }
 
   #rust_mode_name(mode: RustGlideModalT.GlideMode): GlideMode {

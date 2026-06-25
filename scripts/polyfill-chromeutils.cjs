@@ -67,6 +67,8 @@ globalThis.ChromeUtils = {
         return a_require(`${SRC_DIR}/glide/browser/base/content/browser.mts`);
       case "chrome://glide/content/motions.mjs":
         return a_require(`${SRC_DIR}/glide/browser/base/content/motions.mts`);
+      case "chrome://glide/content/editing-actions.mjs":
+        return a_require(`${SRC_DIR}/glide/browser/base/content/editing-actions.mts`);
       case "chrome://glide/content/extensions.mjs":
         return a_require(`${SRC_DIR}/glide/browser/base/content/extensions.mts`);
       case "chrome://glide/content/browser-dev.mjs":

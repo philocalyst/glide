@@ -14,7 +14,7 @@ import type {
   GlideOperator,
 } from "./browser-excmds-registry.mts";
 import type { ParseResult } from "./utils/args.mjs";
-import type { ResolvedMappingNode } from "./modal-engine.mts";
+import type { ResolvedMappingNode, GlideEditingAction } from "./modal-engine.mts";
 
 const MozUtils = ChromeUtils.importESModule("chrome://glide/content/utils/moz.mjs");
 const Keys = ChromeUtils.importESModule("chrome://glide/content/utils/keys.mjs", { global: "current" });
@@ -36,6 +36,13 @@ interface ExecuteProps {
    * Whether or not the executed command should be saved so that it can be repeated with `.`
    */
   save_to_history?: boolean | undefined;
+
+  /**
+   * Typed editing-action descriptor forwarded to the content process. When
+   * present, `GlideHandlerChild` routes through the descriptor-driven executor
+   * (`editing-actions.mts`); otherwise the legacy per-key switch runs.
+   */
+  editing_action?: GlideEditingAction;
 }
 
 type CommandHistoryEntry =
@@ -183,6 +190,7 @@ class GlideExcmdsClass {
         command: command_meta,
         args: command,
         sequence: props?.mapping?.value?.sequence ?? [],
+        editing_action: props?.editing_action,
       });
       return;
     }
@@ -980,6 +988,7 @@ class GlideExcmdsClass {
     args: string;
     sequence: string[];
     operator?: GlideOperator | null;
+    editing_action?: GlideEditingAction;
   }) {
     const actor = GlideBrowser.get_focused_actor();
     const opts: ParentMessages["Glide::ExecuteContentCommand"] = {
@@ -987,6 +996,7 @@ class GlideExcmdsClass {
       args: props.args,
       operator: props.operator ?? GlideBrowser.state.operator,
       sequence: props.sequence,
+      editing_action: props.editing_action,
     };
     actor.send_async_message("Glide::ExecuteContentCommand", opts);
     console.log("sent execute command with", opts);

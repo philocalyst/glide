@@ -71,11 +71,29 @@ export namespace MotionIntent {
     wrap: boolean;
     constructor(fields: { direction: MotionDirection; wrap: boolean });
   }
+  export class LineStart {}
   export class LineEnd {}
+  export class FirstWord {
+    direction: MotionDirection;
+    constructor(fields: { direction: MotionDirection });
+  }
+  export class Line {
+    direction: MotionDirection;
+    constructor(fields: { direction: MotionDirection });
+  }
   export class WordBegin {
     direction: MotionDirection;
     wordStyle: WordStyleName;
     constructor(fields: { direction: MotionDirection; wordStyle: WordStyleName });
+  }
+  export class WordEnd {
+    direction: MotionDirection;
+    wordStyle: WordStyleName;
+    constructor(fields: { direction: MotionDirection; wordStyle: WordStyleName });
+  }
+  export class ParagraphBegin {
+    direction: MotionDirection;
+    constructor(fields: { direction: MotionDirection });
   }
   export class RawDescription {
     description: string;
@@ -84,8 +102,13 @@ export namespace MotionIntent {
 }
 export type MotionIntent =
   | MotionIntent.Column
+  | MotionIntent.LineStart
   | MotionIntent.LineEnd
+  | MotionIntent.FirstWord
+  | MotionIntent.Line
   | MotionIntent.WordBegin
+  | MotionIntent.WordEnd
+  | MotionIntent.ParagraphBegin
   | MotionIntent.RawDescription;
 
 export namespace EditorOperationIntent {

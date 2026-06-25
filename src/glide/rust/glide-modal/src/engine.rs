@@ -2,11 +2,12 @@ use modalkit::actions::{
     Action, CommandBarAction, CursorAction, EditAction, EditorAction, HistoryAction,
     InsertTextAction,
 };
+use modalkit::editing::context::{EditContext, Resolve};
 use modalkit::env::vim::keybindings::VimMachine;
 use modalkit::key::TerminalKey;
 use modalkit::keybindings::BindingMachine;
 use modalkit::prelude::{
-    Char, Count, EditTarget, MoveDir1D, MoveType, RangeType, Specifier, WordStyle,
+    Char, Count, EditTarget, MoveDir1D, MovePosition, MoveType, RangeType, Specifier, WordStyle,
 };
 
 use crate::actions::{
@@ -124,6 +125,7 @@ impl GlideModalEngine {
                     self.translate_action(
                         previous_mode,
                         &other_action,
+                        &edit_context,
                         &mut resolved_key_result,
                         &mut requested_mode,
                     );
@@ -289,6 +291,7 @@ impl GlideModalEngine {
         &self,
         previous_mode: GlideMode,
         action: &Action<GlideApplicationInfo>,
+        edit_context: &EditContext,
         resolved_key_result: &mut ResolvedKeyResult,
         requested_mode: &mut Option<GlideMode>,
     ) {
@@ -332,7 +335,7 @@ impl GlideModalEngine {
                     BrowserCommandIntent::ExecuteEditingAction {
                         editing_action: EditingActionIntent {
                             operation: editor_operation_intent(specifier),
-                            target: edit_target_intent(edit_target),
+                            target: edit_target_intent(edit_target, edit_context),
                         },
                     },
                 );
@@ -431,19 +434,19 @@ fn editor_operation_intent(specifier: &Specifier<EditAction>) -> EditorOperation
     }
 }
 
-fn edit_target_intent(edit_target: &EditTarget) -> EditTargetIntent {
+fn edit_target_intent(edit_target: &EditTarget, edit_context: &EditContext) -> EditTargetIntent {
     match edit_target {
         EditTarget::CurrentPosition => EditTargetIntent::CurrentPosition,
         EditTarget::Selection => EditTargetIntent::CurrentSelection,
         EditTarget::Range(RangeType::Line, include_line_break, count) => {
             EditTargetIntent::LineRange {
-                count: count_to_u32(count),
+                count: resolve_count(edit_context, count),
                 include_line_break: *include_line_break,
             }
         }
         EditTarget::Motion(move_type, count) => EditTargetIntent::Motion {
             motion: motion_intent(move_type),
-            count: count_to_u32(count),
+            count: resolve_count(edit_context, count),
         },
         other_target => EditTargetIntent::RawDescription {
             description: format!("{other_target:?}"),
@@ -457,9 +460,24 @@ fn motion_intent(move_type: &MoveType) -> MotionIntent {
             direction: motion_direction(*direction),
             wrap: *wrap,
         },
+        MoveType::LinePos(MovePosition::Beginning) => MotionIntent::LineStart,
+        MoveType::LinePos(MovePosition::End) => MotionIntent::LineEnd,
+        MoveType::FirstWord(direction) => MotionIntent::FirstWord {
+            direction: motion_direction(*direction),
+        },
+        MoveType::Line(direction) => MotionIntent::Line {
+            direction: motion_direction(*direction),
+        },
         MoveType::WordBegin(word_style, direction) => MotionIntent::WordBegin {
             direction: motion_direction(*direction),
             word_style: word_style_name(word_style.clone()),
+        },
+        MoveType::WordEnd(word_style, direction) => MotionIntent::WordEnd {
+            direction: motion_direction(*direction),
+            word_style: word_style_name(word_style.clone()),
+        },
+        MoveType::ParagraphBegin(direction) => MotionIntent::ParagraphBegin {
+            direction: motion_direction(*direction),
         },
         other_motion => MotionIntent::RawDescription {
             description: format!("{other_motion:?}"),
@@ -483,12 +501,14 @@ fn word_style_name(word_style: WordStyle) -> WordStyleName {
     }
 }
 
-fn count_to_u32(count: &Count) -> u32 {
-    match count {
-        Count::Contextual => 1,
-        Count::Exact(exact_count) => *exact_count as u32,
-        Count::MinusOne => 1,
-    }
+/// Resolve a modalkit [`Count`] against the active [`EditContext`].
+///
+/// motion/operator counts are usually `Count::Contextual`, with the actual
+/// numeric count (e.g. the `3` in `3w`) living on the context — so resolving
+/// through the context is what makes counts work.
+fn resolve_count(edit_context: &EditContext, count: &Count) -> u32 {
+    let resolved: usize = edit_context.resolve(count);
+    resolved as u32
 }
 
 fn is_glide_managed_mode(mode: GlideMode) -> bool {
