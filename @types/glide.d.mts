@@ -32,14 +32,13 @@ declare type GlideCommandLineShowOptions = { prefill?: string; sources?: GlideCo
 
 declare type GlideCommandLine = GlideCommandLineInterface & XULElement;
 
-declare type KeyMappingIPC =
-  & Omit<
-    NonNullable<
-      import("../src/glide/browser/base/content/utils/keys.mts").KeyMappingTrieNode["value"]
-    >,
-    "command"
-  >
-  & { command: string };
+declare type KeyMappingIPC = {
+  sequence: string[];
+  description?: string | undefined;
+  retain_key_display?: boolean;
+  deleted?: boolean;
+  command: string;
+};
 
 declare interface HTMLElement {
   /**
