@@ -71,6 +71,10 @@ globalThis.ChromeUtils = {
         return a_require(`${SRC_DIR}/glide/browser/base/content/extensions.mts`);
       case "chrome://glide/content/browser-dev.mjs":
         return a_require(`${SRC_DIR}/glide/browser/base/content/browser-dev.mts`);
+      case "chrome://glide/content/modal-engine.mjs":
+        return a_require(`${SRC_DIR}/glide/browser/base/content/modal-engine.mts`);
+      case "chrome://glide/content/mode-config.mjs":
+        return a_require(`${SRC_DIR}/glide/browser/base/content/mode-config.mts`);
       case "chrome://glide/content/text-objects.mjs":
         return a_require(`${SRC_DIR}/glide/browser/base/content/text-objects.mts`);
       case "chrome://glide/content/browser-constants.mjs":
