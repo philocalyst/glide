@@ -237,40 +237,28 @@ function range_kind_from_intent(range: RustGlideModalT.RangeTargetIntent): Glide
  * typed descriptor the content executor can consume; the caller then falls
  * back to the legacy per-key path.
  *
- * `pending_operator` resolves modalkit's `Specifier::Contextual` (which shows
- * up as `RawDescription("contextual")`) to the actual operation (`d`→delete,
- * `c`→change) when the intent came from an operator-pending key.
+ * The operator is already resolved by the Rust engine from modalkit's context
+ * (so `dw` arrives as `Delete`, `yw` as `Yank`). `enters_insert` reflects an
+ * accompanying transition into insert mode, which is how `c` (change) is
+ * distinguished from `d` (delete) — modalkit models `c` as a `Delete` plus an
+ * insert-mode transition rather than a distinct edit action.
  */
 function editing_action_from_intent(
   intent: RustGlideModalT.EditingActionIntent,
-  pending_operator: "d" | "c" | null,
+  enters_insert: boolean,
 ): GlideEditingAction | undefined {
   let operation: GlideEditingAction["operation"];
   const op = intent.operation;
   if (op instanceof RustGlideModal.EditorOperationIntent.Motion) {
     operation = "motion";
   } else if (op instanceof RustGlideModal.EditorOperationIntent.Delete) {
-    operation = "delete";
-  } else if (op instanceof RustGlideModal.EditorOperationIntent.Change) {
-    operation = "change";
+    // A delete that also drops into insert mode is a `change` (`cw`, `cc`).
+    operation = enters_insert ? "change" : "delete";
   } else if (op instanceof RustGlideModal.EditorOperationIntent.Yank) {
     operation = "yank";
-  } else if (op instanceof RustGlideModal.EditorOperationIntent.Replace) {
-    operation = "replace";
-  } else if (op instanceof RustGlideModal.EditorOperationIntent.RawDescription) {
-    // modalkit uses `Specifier::Contextual` for operator-pending keys; the
-    // actual operation is the pending operator (`d`/`c`).
-    operation = pending_operator === "d"
-      ? "delete"
-      : pending_operator === "c"
-      ? "change"
-      : "raw";
   } else {
-    return undefined;
-  }
-
-  if (operation === "raw" || operation === "replace") {
-    // Replace isn't routed through the descriptor executor yet.
+    // `Replace` / `RawDescription` aren't routed through the descriptor
+    // executor yet; fall back to the legacy per-key path.
     return undefined;
   }
 
@@ -726,30 +714,18 @@ export class GlideModalEngine {
    * default (i.e. one not present in the TS registry).
    */
   #synthesize_command(result: RustGlideModalT.ResolvedKeyResult): glide.ExcmdValue | null {
-    // When an operator-pending key resolves the operator (e.g. `dw`, `diw`,
-    // `d$`), modalkit emits an `ExecuteEditingAction` intent AND a mode
-    // transition back to normal. The content actor's `execute_motion` handler
-    // applies the action and then performs the mode change itself, so we
-    // synthesize `execute_motion` here (with the typed `editing_action`
-    // attached by `handle_key_event`) rather than a bare `mode_change normal`
-    // that would drop the intent.
+    // Any typed editing action — a bare motion (`w`), an operator+motion
+    // (`dw`, `d$`), a text object (`diw`), or a line edit (`dd`) — is applied
+    // content-side through the `motion` excmd. The descriptor carries the
+    // operation (move/delete/yank) and the content actor reads it to apply the
+    // edit and perform the resulting mode change (`change` → insert), so we
+    // route everything here rather than dropping the intent into a bare
+    // `mode_change` for the op-pending → normal/insert transition.
     const has_editing_action = result.browserCommandIntents.some(
       intent => intent instanceof RustGlideModal.BrowserCommandIntent.ExecuteEditingAction,
     );
-    const operator = result.operator === RustGlideModal.PendingOperator.Delete
-      ? "d"
-      : result.operator === RustGlideModal.PendingOperator.Change
-      ? "c"
-      : null;
 
-    if (has_editing_action && operator) {
-      return "execute_motion" as glide.ExcmdString;
-    }
-
-    // A bare motion in normal/visual mode (no operator) emits an
-    // `ExecuteEditingAction` with `operation: Motion`. Synthesize a `motion`
-    // excmd so the content actor runs the descriptor-driven caret move.
-    if (has_editing_action && !operator && !result.modeTransition) {
+    if (has_editing_action) {
       return "motion" as glide.ExcmdString;
     }
 
@@ -765,12 +741,6 @@ export class GlideModalEngine {
               : "--automove=left",
           );
         }
-      }
-
-      if (result.operator === RustGlideModal.PendingOperator.Delete) {
-        parts.push("--operator=d");
-      } else if (result.operator === RustGlideModal.PendingOperator.Change) {
-        parts.push("--operator=c");
       }
 
       return parts.join(" ") as glide.ExcmdString;
@@ -802,15 +772,14 @@ export class GlideModalEngine {
    * there's no typed descriptor or it isn't handled by the executor.
    */
   #editing_action_from_result(result: RustGlideModalT.ResolvedKeyResult): GlideEditingAction | undefined {
-    const pending_operator: "d" | "c" | null = result.operator === RustGlideModal.PendingOperator.Delete
-      ? "d"
-      : result.operator === RustGlideModal.PendingOperator.Change
-      ? "c"
-      : null;
+    // `c` (change) arrives from modalkit as a `Delete` operation plus a
+    // transition into insert mode; recover the "change" intent from that
+    // transition so the content executor drops into insert after deleting.
+    const enters_insert = result.modeTransition?.nextMode === RustGlideModal.GlideMode.Insert;
 
     for (const intent of result.browserCommandIntents) {
       if (intent instanceof RustGlideModal.BrowserCommandIntent.ExecuteEditingAction) {
-        return editing_action_from_intent(intent.editingAction, pending_operator);
+        return editing_action_from_intent(intent.editingAction, enters_insert);
       }
     }
     return undefined;
@@ -886,14 +855,13 @@ export class GlideModalEngine {
     this.set("normal", "A", "mode_change insert --automove=endline");
 
     this.set("normal", "u", "undo");
-    this.set("normal", "d", "mode_change op-pending --operator=d", { retain_key_display: true });
-    this.set("normal", "c", "mode_change op-pending --operator=c", { retain_key_display: true });
-    // Simple vim motions (`w`, `e`, `b`, `$`, `0`, `^`, `{`, `}`, `h`, `j`,
-    // `k`, `l`) and text objects (`iw`, `i(`, …) are handled by modalkit's
-    // built-in keybindings — no JS registration needed. The Rust engine emits
-    // a typed `ExecuteEditingAction` intent which `editing-actions.mts`
-    // consumes. Operator-pending `dd` is also native (modalkit VOMAP `d` →
-    // `Range(Line)`).
+    // Operators (`d`, `c`, `y`), the simple vim motions (`w`, `e`, `b`, `$`,
+    // `0`, `^`, `{`, `}`), and text objects (`iw`, `i(`, …) are all handled by
+    // modalkit's built-in keybindings — no JS registration needed. The Rust
+    // engine resolves the operator from its own context and emits a typed
+    // `ExecuteEditingAction` intent (operation + target) which
+    // `editing-actions.mts` applies. `c` arrives as a `Delete` plus an
+    // insert-mode transition; `dd`/`cc` arrive as `Range(Line)`.
 
     // Custom Glide commands with no modalkit equivalent — still JS-registered.
     this.set("normal", "x", "motion x");

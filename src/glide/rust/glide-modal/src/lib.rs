@@ -92,9 +92,65 @@ mod tests {
             motion_result.browser_command_intents,
             vec![BrowserCommandIntent::ExecuteEditingAction {
                 editing_action: EditingActionIntent {
-                    operation: EditorOperationIntent::RawDescription {
-                        description: "contextual".into(),
+                    // `d` set the pending operator in modalkit's context, so the
+                    // contextual operator resolves to a concrete `Delete`.
+                    operation: EditorOperationIntent::Delete,
+                    target: EditTargetIntent::Motion {
+                        motion: MotionIntent::WordBegin {
+                            direction: MotionDirection::Next,
+                            word_style: WordStyleName::Little,
+                        },
+                        count: 1,
                     },
+                },
+            }]
+        );
+        assert_eq!(bridge.current_mode_name(), GlideMode::Normal.as_str());
+    }
+
+    #[test]
+    fn change_operator_emits_delete_and_enters_insert() {
+        // `cw` is modelled as a `Delete` edit plus a transition into insert mode
+        // — there is no distinct `Change` edit action. The JS layer recovers the
+        // "change" intent from the insert-mode transition. Note modalkit also
+        // implements the vim `cw`-acts-like-`ce` special case natively, emitting
+        // `WordEnd` (operate to the end of the word) rather than `WordBegin`.
+        let bridge = GlideModalBridge::default();
+        let _ = bridge.resolve_key_notation("c".into());
+        let result = bridge.resolve_key_notation("w".into());
+
+        assert_eq!(
+            result.browser_command_intents,
+            vec![BrowserCommandIntent::ExecuteEditingAction {
+                editing_action: EditingActionIntent {
+                    operation: EditorOperationIntent::Delete,
+                    target: EditTargetIntent::Motion {
+                        motion: MotionIntent::WordEnd {
+                            direction: MotionDirection::Next,
+                            word_style: WordStyleName::Little,
+                        },
+                        count: 1,
+                    },
+                },
+            }]
+        );
+        assert_eq!(
+            result.mode_transition.unwrap().next_mode,
+            GlideMode::Insert
+        );
+    }
+
+    #[test]
+    fn yank_operator_resolves_to_typed_yank() {
+        let bridge = GlideModalBridge::default();
+        let _ = bridge.resolve_key_notation("y".into());
+        let result = bridge.resolve_key_notation("w".into());
+
+        assert_eq!(
+            result.browser_command_intents,
+            vec![BrowserCommandIntent::ExecuteEditingAction {
+                editing_action: EditingActionIntent {
+                    operation: EditorOperationIntent::Yank,
                     target: EditTargetIntent::Motion {
                         motion: MotionIntent::WordBegin {
                             direction: MotionDirection::Next,
@@ -118,9 +174,9 @@ mod tests {
             result.browser_command_intents,
             vec![BrowserCommandIntent::ExecuteEditingAction {
                 editing_action: EditingActionIntent {
-                    operation: EditorOperationIntent::RawDescription {
-                        description: "contextual".into(),
-                    },
+                    // No operator pending, so the contextual operator resolves to
+                    // the default `Motion` (a bare `3w` caret move).
+                    operation: EditorOperationIntent::Motion,
                     target: EditTargetIntent::Motion {
                         motion: MotionIntent::WordBegin {
                             direction: MotionDirection::Next,
@@ -145,9 +201,7 @@ mod tests {
             result.browser_command_intents,
             vec![BrowserCommandIntent::ExecuteEditingAction {
                 editing_action: EditingActionIntent {
-                    operation: EditorOperationIntent::RawDescription {
-                        description: "contextual".into(),
-                    },
+                    operation: EditorOperationIntent::Delete,
                     target: EditTargetIntent::Motion {
                         motion: MotionIntent::LineEnd,
                         count: 0,
@@ -172,9 +226,7 @@ mod tests {
             result.browser_command_intents,
             vec![BrowserCommandIntent::ExecuteEditingAction {
                 editing_action: EditingActionIntent {
-                    operation: EditorOperationIntent::RawDescription {
-                        description: "contextual".into(),
-                    },
+                    operation: EditorOperationIntent::Delete,
                     target: EditTargetIntent::Range {
                         range: RangeTargetIntent::Word {
                             word_style: WordStyleName::Little,
@@ -199,9 +251,7 @@ mod tests {
             result.browser_command_intents,
             vec![BrowserCommandIntent::ExecuteEditingAction {
                 editing_action: EditingActionIntent {
-                    operation: EditorOperationIntent::RawDescription {
-                        description: "contextual".into(),
-                    },
+                    operation: EditorOperationIntent::Delete,
                     target: EditTargetIntent::Range {
                         range: RangeTargetIntent::Bracketed {
                             left: "(".into(),
@@ -227,9 +277,7 @@ mod tests {
             result.browser_command_intents,
             vec![BrowserCommandIntent::ExecuteEditingAction {
                 editing_action: EditingActionIntent {
-                    operation: EditorOperationIntent::RawDescription {
-                        description: "contextual".into(),
-                    },
+                    operation: EditorOperationIntent::Delete,
                     target: EditTargetIntent::Range {
                         range: RangeTargetIntent::Quote { quote: "\"".into() },
                         inclusive: true,
@@ -251,9 +299,7 @@ mod tests {
             repeated.browser_command_intents,
             vec![BrowserCommandIntent::ExecuteEditingAction {
                 editing_action: EditingActionIntent {
-                    operation: EditorOperationIntent::RawDescription {
-                        description: "contextual".into(),
-                    },
+                    operation: EditorOperationIntent::Delete,
                     target: EditTargetIntent::Motion {
                         motion: MotionIntent::WordBegin {
                             direction: MotionDirection::Next,

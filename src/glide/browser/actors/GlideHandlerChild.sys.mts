@@ -462,43 +462,10 @@ export class GlideHandlerChild extends JSWindowActorChild<
         }
         break;
       }
-      case "execute_motion": {
-        const operator = props.operator ?? this.state?.operator;
-        if (!operator) {
-          throw new Error("cannot execute motion, no operator defined");
-        }
-
-        const sequence = props.sequence.join("");
-        const editor = this.#expect_editor(`${operator}${sequence}`);
-
-        if (!props.editing_action) {
-          throw new Error(
-            `cannot execute \`${operator}${sequence}\`: no typed editing-action descriptor (this key should be JS-registered or handled by modalkit)`,
-          );
-        }
-
-        const handled = editing_actions.apply_editing_action(editor, props.editing_action, {
-          mode: this.state?.mode ?? "normal",
-          operator,
-        });
-        if (!handled) {
-          throw new Error(
-            `cannot execute \`${operator}${sequence}\`: the descriptor executor could not handle action ${JSON.stringify(props.editing_action)}`,
-          );
-        }
-
-        this.#record_repeatable_command({ ...props, operator });
-        this.#change_mode(operator === "c" ? "insert" : "normal");
-        break;
-      }
       case "motion": {
         const {
           args: { keyseq },
         } = parse_command_args(props.command, props.args);
-
-        if (keyseq !== undefined && this.#motion_is_repeatable(keyseq)) {
-          this.#record_repeatable_command(props);
-        }
 
         if (keyseq === "v") {
           this.#change_mode("visual");
@@ -507,20 +474,47 @@ export class GlideHandlerChild extends JSWindowActorChild<
 
         const editor = this.#expect_editor(keyseq ?? "motion");
 
-        // Descriptor-driven path: if a typed editing-action is attached, route
-        // through `editing-actions.mts`. This handles all modalkit-native
-        // motions (`w`, `e`, `b`, `$`, `0`, `^`, `{`, `}`) with counts.
+        // Descriptor-driven path: a typed editing-action covers every
+        // modalkit-native key — bare motions (`w`, `e`, `b`, `$`, `0`, `^`,
+        // `{`, `}`) with counts, operator+motion (`dw`, `d$`, `cw`), text
+        // objects (`diw`), and line edits (`dd`). The `operation` field tells
+        // us what the edit was and what mode to land in afterwards.
         if (props.editing_action) {
           const handled = editing_actions.apply_editing_action(editor, props.editing_action, {
             mode: this.state?.mode ?? "normal",
-            operator: props.operator ?? this.state?.operator ?? null,
+            operator: null,
           });
           if (handled) {
-            if (props.editing_action.operation === "change") {
-              this.#change_mode("insert");
+            switch (props.editing_action.operation) {
+              // An edit (delete/change/yank) ends the operator and is
+              // dot-repeatable; `change` additionally enters insert mode.
+              case "change":
+                this.#record_repeatable_command(props);
+                this.#change_mode("insert");
+                break;
+              case "delete":
+              case "yank":
+                this.#record_repeatable_command(props);
+                this.#change_mode("normal");
+                break;
+              // A bare motion just moves the caret — no mode change, and `.`
+              // does not repeat motions.
             }
             break;
           }
+        }
+
+        // Beyond this point we need a concrete `keyseq`. A bare `motion` excmd
+        // with no `keyseq` only ever arrives with a typed descriptor (handled
+        // above); reaching here without one is a bug in command synthesis.
+        if (keyseq === null) {
+          throw new Error(
+            "`motion` excmd requires either a `keyseq` or a typed `editing_action` descriptor",
+          );
+        }
+
+        if (this.#motion_is_repeatable(keyseq)) {
+          this.#record_repeatable_command(props);
         }
 
         // Legacy per-key arms for custom Glide commands that have no modalkit
@@ -652,17 +646,17 @@ export class GlideHandlerChild extends JSWindowActorChild<
   }
 
   /**
-   * Whether or not `.` should be updated to repeat this motion.
+   * Whether or not `.` should be updated to repeat this legacy per-key motion.
    *
-   * Only the remaining legacy per-key motions (`x`, `X`, `o`) are repeatable;
-   * descriptor-driven motions are repeatable via the operator's
-   * `execute_motion` recording, not this path.
+   * Only the custom Glide edits with no modalkit equivalent (`x`, `X`, `o`) go
+   * through here; descriptor-driven edits (`dw`, `cw`, …) are recorded as
+   * repeatable directly in the `motion` case based on their operation.
    */
   #motion_is_repeatable(
-    keyseq: ParsedArg<GlideExcmdsMap["motion"]["args_schema"]["keyseq"]> | undefined,
+    keyseq: ParsedArg<GlideExcmdsMap["motion"]["args_schema"]["keyseq"]>,
   ): boolean {
     switch (keyseq) {
-      case undefined:
+      case null:
       case "s":
       case "v":
       case "vh":

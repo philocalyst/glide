@@ -334,7 +334,7 @@ impl GlideModalEngine {
                 resolved_key_result.browser_command_intents.push(
                     BrowserCommandIntent::ExecuteEditingAction {
                         editing_action: EditingActionIntent {
-                            operation: editor_operation_intent(specifier),
+                            operation: editor_operation_intent(specifier, edit_context),
                             target: edit_target_intent(edit_target, edit_context),
                         },
                     },
@@ -417,19 +417,25 @@ impl GlideModalEngine {
     }
 }
 
-fn editor_operation_intent(specifier: &Specifier<EditAction>) -> EditorOperationIntent {
-    match specifier {
-        Specifier::Contextual => EditorOperationIntent::RawDescription {
-            description: "contextual".into(),
-        },
-        Specifier::Exact(edit_action) => match edit_action {
-            EditAction::Motion => EditorOperationIntent::Motion,
-            EditAction::Delete => EditorOperationIntent::Delete,
-            EditAction::Yank => EditorOperationIntent::Yank,
-            EditAction::Replace(_) => EditorOperationIntent::Replace,
-            other_action => EditorOperationIntent::RawDescription {
-                description: format!("{other_action:?}"),
-            },
+/// Resolve the operator for an edit into a typed [`EditorOperationIntent`].
+///
+/// Operator-pending motions (e.g. `dw`, `yw`) arrive as `Specifier::Contextual`
+/// — modalkit defers the operator to the [`EditContext`], which holds the
+/// pending operator set by the operator key (`d`/`c`/`y`). Resolving here lets
+/// the operator stay entirely inside Rust/modalkit; the JS layer no longer has
+/// to track it. Note `c` (change) is modelled as `Delete` plus a transition to
+/// insert mode, so there is no distinct `Change` edit action.
+fn editor_operation_intent(
+    specifier: &Specifier<EditAction>,
+    edit_context: &EditContext,
+) -> EditorOperationIntent {
+    match edit_context.resolve(specifier) {
+        EditAction::Motion => EditorOperationIntent::Motion,
+        EditAction::Delete => EditorOperationIntent::Delete,
+        EditAction::Yank => EditorOperationIntent::Yank,
+        EditAction::Replace(_) => EditorOperationIntent::Replace,
+        other_action => EditorOperationIntent::RawDescription {
+            description: format!("{other_action:?}"),
         },
     }
 }

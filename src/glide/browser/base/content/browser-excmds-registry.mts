@@ -418,14 +418,6 @@ export const GLIDE_EXCOMMANDS = [
 
   // ------------ vim motions ------------
   {
-    name: "execute_motion",
-    description: "Used from op-pending mode to execute a motion.",
-    content: true,
-    // note: it's up to the handler in `GlideHandlerChild.sys.mts` to determine if the command
-    //       can be repeated and register it in the history.
-    repeatable: false,
-  },
-  {
     name: "motion",
     description: "Execute a given motion (internal)",
     content: true,
@@ -434,18 +426,12 @@ export const GLIDE_EXCOMMANDS = [
     args_schema: {
       keyseq: {
         type: {
+          // Only custom Glide motions with no modalkit equivalent remain here.
+          // The common vim motions (`w`/`e`/`b`/`$`/`0`/`^`/`{`/`}`) flow
+          // through the typed `editing_action` descriptor instead, where
+          // `keyseq` is unused.
           enum: [
-            "w",
-            "W",
-            "e",
-            "b",
-            "B",
             "I",
-            "0",
-            "^",
-            "$",
-            "{",
-            "}",
             "s",
             "v",
             "vh",
