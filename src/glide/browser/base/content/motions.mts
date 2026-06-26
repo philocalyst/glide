@@ -3,11 +3,8 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-import type { GlideOperator } from "./browser-excmds-registry.mts";
-
 const text_obj = ChromeUtils.importESModule("chrome://glide/content/text-objects.mjs");
 const { assert_never } = ChromeUtils.importESModule("chrome://glide/content/utils/guards.mjs");
-const strings = ChromeUtils.importESModule("chrome://glide/content/utils/strings.mjs");
 
 /**
  * A minimal representation of `nsIEditor` so that we can re-implement editors
@@ -31,162 +28,12 @@ export interface Editor {
 }
 
 /**
- * Fallback motion helpers used by the content-side adapter and tests.
+ * Offset primitives for the descriptor-driven editing executor
+ * (`editing-actions.mts`) and legacy content handlers.
  *
- * Supported motions are being moved to the modal edit-plan path; this file now
- * primarily holds helper functions and legacy fallbacks for motions that have
- * not yet been ported.
+ * Each function moves the caret (or extends the selection) by one unit; the
+ * executor composes them to realize counts, operator×motion, and text objects.
  */
-type GlideMotion = "iw" | "h" | "j" | "k" | "l" | "d";
-
-export function select_motion(
-  editor: nsIEditor,
-  motion: GlideMotion,
-  mode: GlideMode,
-  operator: GlideOperator,
-):
-  | {
-    // TODO(glide): figure out a different pattern for this problem
-    fixup_deletion: () => void;
-  }
-  | undefined
-{
-  switch (motion) {
-    case "iw": {
-      start_of_word(editor);
-      end_of_word(editor, { extend: true, inclusive: true });
-      break;
-    }
-    case "h": {
-      // we are at the beginning of the input or on the very first char,
-      // there's nothing for us to do
-      if (
-        editor.selection.focusOffset <= 1
-        || preceding_char(editor) === "\n"
-      ) {
-        return;
-      }
-
-      back_char(editor, false);
-      back_char(editor, true);
-      break;
-    }
-    case "j": {
-      const text = editor.selection.focusNode?.textContent;
-      if (!text) {
-        throw new Error("No text");
-      }
-
-      // TODO(glide): clean this up
-      var left_newline_index = strings.reverse_indexof(text, "\n", editor.selection.focusOffset - 1);
-      if (left_newline_index === -1) {
-        left_newline_index = 0;
-      }
-      var right_newline_index = text.indexOf("\n", editor.selection.focusOffset);
-
-      if (right_newline_index === -1) {
-        // there is only one line, we can't do anything
-        return;
-      }
-
-      const right_aligned_pos_in_line = right_newline_index - editor.selection.focusOffset;
-
-      right_newline_index = text.indexOf("\n", right_newline_index + 1);
-      if (right_newline_index === -1) {
-        right_newline_index = text.length;
-      }
-
-      const was_on_newline = current_char(editor) === "\n";
-
-      while (editor.selection.focusOffset > left_newline_index) {
-        editor.selectionController.characterMove(false, false);
-      }
-
-      while (editor.selection.focusOffset < right_newline_index) {
-        editor.selectionController.characterMove(true, true);
-      }
-
-      if (
-        editor.selection.anchorOffset === 0
-        && text.charAt(editor.selection.focusOffset)
-      ) {
-        editor.selectionController.characterMove(true, true);
-      }
-
-      return {
-        // ensure the caret is put in the correct place after deletion
-        // Note: I think this could be cleaned up substantially, inside `d`
-        //       we could instead get the col number before deleting and then
-        //       ensure the col number is the same if possible
-        fixup_deletion() {
-          if (was_on_newline && current_char(editor) !== "\n") {
-            beginning_of_line(editor, false);
-            return;
-          }
-
-          for (let i = 0; i < right_aligned_pos_in_line; i++) {
-            if (is_bof(editor, "left")) {
-              break;
-            }
-            editor.selectionController.characterMove(false, false);
-          }
-        },
-      };
-    }
-    case "k": {
-      if (mode !== "visual") {
-        end_of_line(editor, false, true);
-      }
-
-      editor.selectionController.lineMove(false, true);
-      beginning_of_line(editor, true, true);
-      break;
-    }
-    case "l": {
-      back_char(editor, false);
-      forward_char(editor, true);
-      break;
-    }
-    case "d": {
-      if (operator !== "d") {
-        // the `d` motion is only allowed with `dd`, e.g. `cd` doesn't do anything
-        return;
-      }
-
-      if (is_empty_line(editor)) {
-        // For empty lines, select just the newline character
-        editor.selectionController.characterMove(false, false);
-        editor.selectionController.characterMove(true, true);
-
-        return {
-          fixup_deletion() {
-            // Position cursor at the start of the next line after deletion
-            if (!is_eof(editor) && current_char(editor) === "\n") {
-              editor.selectionController.characterMove(true, false);
-            }
-          },
-        };
-      }
-
-      const col_pos = get_column_offset(editor);
-      beginning_of_line(editor, false, true);
-      end_of_line(editor, true, true);
-
-      return {
-        fixup_deletion() {
-          for (let i = 0; i < col_pos; i++) {
-            editor.selectionController.characterMove(true, false);
-            if (is_eof(editor) || next_char(editor) === "\n") {
-              break;
-            }
-          }
-        },
-      };
-    }
-    default:
-      throw assert_never(motion, `Unknown motion: ${motion}`);
-  }
-}
 
 /**
  * Returns the offset of the caret in the current line.
@@ -283,9 +130,8 @@ export function end_of_word(
 export function forward_word(
   editor: Editor,
   bigword: boolean,
-  mode: GlideMode | undefined,
+  extend: boolean,
 ) {
-  const extend = mode === "visual";
   const starting_cls = text_obj.cls(current_char(editor));
 
   // we always want to move one character forward no matter what
@@ -325,9 +171,7 @@ export function forward_word(
 /**
  * Move the selection to the end of the word.
  */
-export function end_word(editor: Editor, mode: GlideMode | undefined) {
-  const extend = mode === "visual";
-
+export function end_word(editor: Editor, extend: boolean) {
   do {
     // we always want to move one character forward no matter what
     editor.selectionController.characterMove(true, extend);
@@ -353,13 +197,13 @@ export function end_word(editor: Editor, mode: GlideMode | undefined) {
  * `bigword=true`  -> equivalent to `B`
  * `bigword=false` -> equivalent to `b`
  */
-export function back_word(editor: Editor, bigword: boolean) {
+export function back_word(editor: Editor, bigword: boolean, extend: boolean) {
   // we always want to move one character back no matter what
-  editor.selectionController.characterMove(/* forward */ false, /* extend */ false);
+  editor.selectionController.characterMove(/* forward */ false, extend);
 
   // find the end of the previous word
   while (text_obj.cls(current_char(editor)) === text_obj.CLS_WHITESPACE) {
-    editor.selectionController.characterMove(/* forward */ false, /* extend */ false);
+    editor.selectionController.characterMove(/* forward */ false, extend);
 
     if (is_bof(editor)) {
       break;
@@ -370,7 +214,7 @@ export function back_word(editor: Editor, bigword: boolean) {
   const starting_cls = text_obj.cls(current_char(editor));
   if (bigword) {
     while (text_obj.cls(current_char(editor)) !== text_obj.CLS_WHITESPACE) {
-      editor.selectionController.characterMove(/* forward */ false, /* extend */ false);
+      editor.selectionController.characterMove(/* forward */ false, extend);
 
       if (is_bof(editor)) {
         break;
@@ -378,7 +222,7 @@ export function back_word(editor: Editor, bigword: boolean) {
     }
   } else {
     while (text_obj.cls(current_char(editor)) === starting_cls) {
-      editor.selectionController.characterMove(/* forward */ false, /* extend */ false);
+      editor.selectionController.characterMove(/* forward */ false, extend);
 
       if (is_bof(editor)) {
         break;
@@ -388,7 +232,7 @@ export function back_word(editor: Editor, bigword: boolean) {
 
   // we moved one too far
   if (text_obj.cls(current_char(editor)) !== starting_cls || is_bof(editor)) {
-    editor.selectionController.characterMove(/* forward */ true, /* extend */ false);
+    editor.selectionController.characterMove(/* forward */ true, extend);
   }
 }
 

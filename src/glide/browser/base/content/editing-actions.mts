@@ -44,6 +44,8 @@ export function apply_editing_action(
     handled = apply_motion_action(editor, action, ctx);
   } else if (action.target.kind === "range") {
     handled = apply_range_action(editor, action, ctx);
+  } else if (action.target.kind === "line-range") {
+    handled = apply_line_range_action(editor, action);
   }
 
   if (!handled) {
@@ -157,7 +159,7 @@ function apply_range_action(
 
   switch (range_kind) {
     case "word":
-      return select_word_range(editor, target.inclusive ?? true, target.wordStyle === "big");
+      return select_word_range(editor, target.inclusive ?? true);
     case "bracketed":
       return select_bracketed_range(editor, target.left ?? "(", target.right ?? ")", target.inclusive ?? false);
     case "quote":
@@ -167,6 +169,32 @@ function apply_range_action(
       // implemented in the content executor; fall back to the legacy path.
       return false;
   }
+}
+
+/**
+ * Select `count` lines starting from the current line (`dd` / `3dd`).
+ */
+function apply_line_range_action(editor: nsIEditor, action: GlideEditingAction): boolean {
+  const count = Math.max(1, action.target.count);
+
+  if (!editor.selection.isCollapsed) {
+    editor.selection.collapse(editor.selection.focusNode, editor.selection.focusOffset);
+  }
+
+  // Select from beginning of current line to end of line `count` lines down.
+  motions.beginning_of_line(editor, false, true);
+  for (let i = 1; i < count; i++) {
+    editor.selectionController.lineMove(true, true);
+  }
+  motions.end_of_line(editor, true, true);
+
+  // Also include the newline at the end of the last line (if present) so the
+  // entire line is removed.
+  if (motions.next_char(editor) === "\n") {
+    editor.selectionController.characterMove(true, true);
+  }
+
+  return true;
 }
 
 /**
@@ -184,29 +212,18 @@ function step_motion(
   bigword: boolean,
   extend: boolean,
 ): boolean {
-  // For `extend` we temporarily toggle the editor into a "visual-like" mode by
-  // passing `extend=true` to the motion primitives. The legacy primitives use
-  // `mode === "visual"` to decide extending, so for operator+motion we fake it
-  // by always extending here.
-  const fake_mode: GlideMode | undefined = extend ? "visual" : undefined;
-
   switch (motion) {
     case "word-begin": {
       if (direction === "next") {
-        motions.forward_word(editor, bigword, fake_mode);
-        return true;
+        motions.forward_word(editor, bigword, extend);
+      } else {
+        motions.back_word(editor, bigword, extend);
       }
-      // `b` / `B`: backwards word. The legacy primitive doesn't extend, so for
-      // operator+motion (`db`) we walk back one char at a time extending.
-      if (extend) {
-        return step_back_word_extending(editor, bigword);
-      }
-      motions.back_word(editor, bigword);
       return true;
     }
     case "word-end": {
       if (direction === "next") {
-        motions.end_word(editor, fake_mode);
+        motions.end_word(editor, extend);
         return true;
       }
       return false;
@@ -251,30 +268,6 @@ function step_motion(
   }
 }
 
-/**
- * Extend the selection backwards by one word, since `motions.back_word`
- * doesn't take an `extend` parameter. We move back without extending, then
- * re-extend the selection forward to the previous caret position.
- */
-function step_back_word_extending(editor: nsIEditor, bigword: boolean): boolean {
-  const start_node = editor.selection.focusNode;
-  const start_offset = editor.selection.focusOffset;
-
-  // Move back without extending to find the start of the previous word.
-  motions.back_word(editor, bigword);
-
-  const new_offset = editor.selection.focusOffset;
-  if (new_offset === start_offset) {
-    return false;
-  }
-
-  // Re-select from the new position back to the original.
-  if (start_node != null) {
-    editor.selection.extend(start_node, start_offset);
-  }
-  return true;
-}
-
 // ---------------------------------------------------------------------------
 // Text-object range primitives (Stage B)
 // ---------------------------------------------------------------------------
@@ -285,8 +278,11 @@ function step_back_word_extending(editor: nsIEditor, bigword: boolean): boolean 
  * `inclusive=true` (`aw`) also includes surrounding whitespace; `inclusive=false`
  * (`iw`) selects just the word characters. Mirrors the legacy `select_motion`
  * `iw` arm but adds the `aw` whitespace expansion.
+ *
+ * Note: `iW`/`aW` (big-word objects) currently behave like `iw`/`aw`; the
+ * underlying `start_of_word`/`end_of_word` primitives don't take a word style.
  */
-function select_word_range(editor: nsIEditor, inclusive: boolean, bigword: boolean): boolean {
+function select_word_range(editor: nsIEditor, inclusive: boolean): boolean {
   // Move to the start of the current word, then extend to its end.
   motions.start_of_word(editor);
   const anchor_node = editor.selection.focusNode;

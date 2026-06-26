@@ -471,60 +471,24 @@ export class GlideHandlerChild extends JSWindowActorChild<
         const sequence = props.sequence.join("");
         const editor = this.#expect_editor(`${operator}${sequence}`);
 
-        // Stage A: if a typed editing-action descriptor is attached, route
-        // through the descriptor-driven executor. It returns `false` for any
-        // action it can't handle yet, in which case we fall back to the legacy
-        // per-key switch below.
-        if (props.editing_action) {
-          const handled = editing_actions.apply_editing_action(editor, props.editing_action, {
-            mode: this.state?.mode ?? "normal",
-            operator,
-          });
-          if (handled) {
-            if (operator === "c") {
-              this.#record_repeatable_command({ ...props, operator });
-              this.#change_mode("insert");
-            } else {
-              this.#record_repeatable_command({ ...props, operator });
-              this.#change_mode("normal");
-            }
-            break;
-          }
+        if (!props.editing_action) {
+          throw new Error(
+            `cannot execute \`${operator}${sequence}\`: no typed editing-action descriptor (this key should be JS-registered or handled by modalkit)`,
+          );
         }
 
-        switch (operator) {
-          case "d": {
-            const result = motions.select_motion(editor, sequence as any, this.state?.mode ?? "normal", operator);
-
-            // if the motion didn't actually select anything, then there's
-            // nothing for us to delete
-            if (!editor.selection.isCollapsed) {
-              motions.delete_selection(editor, true);
-            }
-
-            if (result?.fixup_deletion) {
-              result.fixup_deletion();
-            }
-
-            this.#record_repeatable_command({ ...props, operator });
-            this.#change_mode("normal");
-            break;
-          }
-          case "c": {
-            motions.select_motion(editor, sequence as any, this.state?.mode ?? "normal", operator);
-            motions.delete_selection(editor, false);
-
-            this.#record_repeatable_command({ ...props, operator });
-            this.#change_mode("insert");
-            break;
-          }
-          case "r": {
-            // implementation is in the main thread
-            throw new Error("The `r` operator cannot be executed");
-          }
-          default:
-            throw assert_never(operator);
+        const handled = editing_actions.apply_editing_action(editor, props.editing_action, {
+          mode: this.state?.mode ?? "normal",
+          operator,
+        });
+        if (!handled) {
+          throw new Error(
+            `cannot execute \`${operator}${sequence}\`: the descriptor executor could not handle action ${JSON.stringify(props.editing_action)}`,
+          );
         }
+
+        this.#record_repeatable_command({ ...props, operator });
+        this.#change_mode(operator === "c" ? "insert" : "normal");
         break;
       }
       case "motion": {
@@ -532,7 +496,7 @@ export class GlideHandlerChild extends JSWindowActorChild<
           args: { keyseq },
         } = parse_command_args(props.command, props.args);
 
-        if (this.#motion_is_repeatable(keyseq)) {
+        if (keyseq !== undefined && this.#motion_is_repeatable(keyseq)) {
           this.#record_repeatable_command(props);
         }
 
@@ -541,18 +505,17 @@ export class GlideHandlerChild extends JSWindowActorChild<
           break;
         }
 
-        const editor = this.#expect_editor(keyseq);
+        const editor = this.#expect_editor(keyseq ?? "motion");
 
-        // Stage A: if a typed editing-action descriptor is attached, route
-        // through the descriptor-driven executor (counts, operator×motion).
-        // Falls back to the legacy per-key switch when it returns `false`.
+        // Descriptor-driven path: if a typed editing-action is attached, route
+        // through `editing-actions.mts`. This handles all modalkit-native
+        // motions (`w`, `e`, `b`, `$`, `0`, `^`, `{`, `}`) with counts.
         if (props.editing_action) {
           const handled = editing_actions.apply_editing_action(editor, props.editing_action, {
             mode: this.state?.mode ?? "normal",
             operator: props.operator ?? this.state?.operator ?? null,
           });
           if (handled) {
-            // `change` operations drop into insert mode; motions stay put.
             if (props.editing_action.operation === "change") {
               this.#change_mode("insert");
             }
@@ -560,51 +523,13 @@ export class GlideHandlerChild extends JSWindowActorChild<
           }
         }
 
+        // Legacy per-key arms for custom Glide commands that have no modalkit
+        // equivalent (no typed descriptor is produced for these).
         switch (keyseq) {
-          case "w": {
-            motions.forward_word(editor, /* bigword */ false, this.state?.mode);
-            break;
-          }
-          case "W": {
-            motions.forward_word(editor, /* bigword */ true, this.state?.mode);
-            break;
-          }
-          case "e": {
-            motions.end_word(editor, this.state?.mode);
-            break;
-          }
-          case "b": {
-            motions.back_word(editor, false);
-            break;
-          }
-          case "B": {
-            motions.back_word(editor, true);
-            break;
-          }
-          case "{": {
-            motions.back_para(editor);
-            break;
-          }
-          case "}": {
-            motions.next_para(editor);
-            break;
-          }
           case "I": {
             motions.first_non_whitespace(editor, false);
             motions.back_char(editor, false);
             this.#change_mode("insert");
-            break;
-          }
-          case "0": {
-            motions.beginning_of_line(editor, false);
-            break;
-          }
-          case "^": {
-            motions.first_non_whitespace(editor, false);
-            break;
-          }
-          case "$": {
-            motions.end_of_line(editor, false);
             break;
           }
           case "s": {
@@ -692,7 +617,7 @@ export class GlideHandlerChild extends JSWindowActorChild<
             break;
           }
           default:
-            throw assert_never(keyseq);
+            throw assert_never(keyseq, `Unhandled motion keyseq: ${keyseq}`);
         }
         break;
       }
@@ -728,21 +653,16 @@ export class GlideHandlerChild extends JSWindowActorChild<
 
   /**
    * Whether or not `.` should be updated to repeat this motion.
+   *
+   * Only the remaining legacy per-key motions (`x`, `X`, `o`) are repeatable;
+   * descriptor-driven motions are repeatable via the operator's
+   * `execute_motion` recording, not this path.
    */
   #motion_is_repeatable(
-    keyseq: ParsedArg<GlideExcmdsMap["motion"]["args_schema"]["keyseq"]>,
+    keyseq: ParsedArg<GlideExcmdsMap["motion"]["args_schema"]["keyseq"]> | undefined,
   ): boolean {
     switch (keyseq) {
-      case "0":
-      case "^":
-      case "w":
-      case "W":
-      case "e":
-      case "b":
-      case "B":
-      case "$":
-      case "{":
-      case "}":
+      case undefined:
       case "s":
       case "v":
       case "vh":
@@ -756,7 +676,7 @@ export class GlideHandlerChild extends JSWindowActorChild<
       case "o":
         return true;
       default:
-        throw assert_never(keyseq);
+        throw assert_never(keyseq, `Unhandled motion keyseq: ${keyseq}`);
     }
   }
 

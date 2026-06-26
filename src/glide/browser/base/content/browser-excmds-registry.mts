@@ -457,7 +457,9 @@ export const GLIDE_EXCOMMANDS = [
             "o",
           ],
         },
-        required: true,
+        // Optional: when a typed `editing_action` descriptor is attached, the
+        // motion kind is read from the descriptor and `keyseq` is unused.
+        required: false,
         position: 0,
       },
     } as const satisfies ArgumentsSchema,

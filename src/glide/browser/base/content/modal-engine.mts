@@ -746,6 +746,13 @@ export class GlideModalEngine {
       return "execute_motion" as glide.ExcmdString;
     }
 
+    // A bare motion in normal/visual mode (no operator) emits an
+    // `ExecuteEditingAction` with `operation: Motion`. Synthesize a `motion`
+    // excmd so the content actor runs the descriptor-driven caret move.
+    if (has_editing_action && !operator && !result.modeTransition) {
+      return "motion" as glide.ExcmdString;
+    }
+
     if (result.modeTransition) {
       const target = result.modeTransition.nextMode;
       const parts = [`mode_change ${this.#rust_mode_name(target)}`];
@@ -881,31 +888,20 @@ export class GlideModalEngine {
     this.set("normal", "u", "undo");
     this.set("normal", "d", "mode_change op-pending --operator=d", { retain_key_display: true });
     this.set("normal", "c", "mode_change op-pending --operator=c", { retain_key_display: true });
-    // `iw` is intentionally *not* registered here so modalkit's built-in text
-    // object (`EditTarget::Range(Word(Little))`) flows through as a typed
-    // descriptor and is handled by `editing-actions.mts` (Stage B).
-    this.set("op-pending", "h", "execute_motion");
-    this.set("op-pending", "j", "execute_motion");
-    this.set("op-pending", "k", "execute_motion");
-    this.set("op-pending", "l", "execute_motion");
-    this.set("op-pending", "d", "execute_motion");
+    // Simple vim motions (`w`, `e`, `b`, `$`, `0`, `^`, `{`, `}`, `h`, `j`,
+    // `k`, `l`) and text objects (`iw`, `i(`, …) are handled by modalkit's
+    // built-in keybindings — no JS registration needed. The Rust engine emits
+    // a typed `ExecuteEditingAction` intent which `editing-actions.mts`
+    // consumes. Operator-pending `dd` is also native (modalkit VOMAP `d` →
+    // `Range(Line)`).
 
-    this.set(["normal", "visual"], "w", "motion w");
-    this.set(["normal", "visual"], "W", "motion W");
-    this.set("normal", "e", "motion e");
-    this.set("normal", "b", "motion b");
-    this.set("normal", "B", "motion B");
+    // Custom Glide commands with no modalkit equivalent — still JS-registered.
     this.set("normal", "x", "motion x");
     this.set("normal", "X", "motion X");
     this.set("normal", "o", "motion o");
-    this.set("normal", "{", "motion {");
-    this.set("normal", "}", "motion }");
-    this.set("normal", "r", "r");
     this.set("normal", "s", "motion s");
     this.set(["normal", "visual"], "I", "motion I");
-    this.set("normal", "0", "motion 0");
-    this.set("normal", "^", "motion ^");
-    this.set("normal", "$", "motion $");
+    this.set("normal", "r", "r");
     this.set("normal", "h", "caret_move left");
     this.set("normal", "l", "caret_move right");
     this.set("normal", "j", "caret_move down");
