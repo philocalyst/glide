@@ -109,9 +109,6 @@ fn keymap_definition_to_input_step(
     keymap_definition: &KeymapDefinition,
 ) -> InputStep<GlideApplicationInfo> {
     match &keymap_definition.command {
-        EngineCommand::RepeatLastAction => InputStep::new().actions(vec![Action::Repeat(
-            modalkit::prelude::RepeatType::EditSequence,
-        )]),
         EngineCommand::ChangeMode { request } => InputStep::new()
             .actions(vec![Action::Application(
                 GlideApplicationAction::ChangeMode(*request),

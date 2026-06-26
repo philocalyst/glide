@@ -173,7 +173,6 @@ function registry_key(mode: GlideMode, sequence: string[]): string {
 interface ParsedModeChange {
   target: GlideMode;
   automove: "left" | "endline" | null;
-  operator: "d" | "c" | null;
 }
 
 function rust_motion_direction(dir: RustGlideModalT.MotionDirection): "previous" | "next" {
@@ -350,12 +349,10 @@ function parse_mode_change(excmd: string): ParsedModeChange | null {
 
   const rest = match[2] ?? "";
   const automove_raw = /--automove=(\S+)/.exec(rest)?.[1] ?? null;
-  const operator_raw = /--operator=(\S+)/.exec(rest)?.[1] ?? null;
 
   return {
     target: match[1] as GlideMode,
     automove: automove_raw === "left" || automove_raw === "endline" ? automove_raw : null,
-    operator: operator_raw === "d" || operator_raw === "c" ? operator_raw : null,
   };
 }
 
@@ -667,20 +664,14 @@ export class GlideModalEngine {
     rhs: glide.ExcmdValue,
   ): RustGlideModalT.EngineCommand {
     if (typeof rhs === "string") {
-      if (rhs.trim() === "repeat") {
-        return new RustGlideModal.EngineCommand.RepeatLastAction();
-      }
-
+      // `.` (`repeat`) is dispatched like any other excmd; the actual replay is
+      // handled JS-side by the `repeat` excmd against `#last_command` (modalkit
+      // can't see custom/async excmds like `r`, so it can't own dot-repeat).
       const mode_change = parse_mode_change(rhs);
       if (mode_change) {
         return new RustGlideModal.EngineCommand.ChangeMode({
           request: new RustGlideModal.ModeChangeRequest({
             targetMode: rust_mode(mode_change.target),
-            pendingOperator: mode_change.operator === "d"
-              ? RustGlideModal.PendingOperator.Delete
-              : mode_change.operator === "c"
-              ? RustGlideModal.PendingOperator.Change
-              : null,
             automaticMoveDirection: mode_change.automove === "left"
               ? RustGlideModal.AutomaticMoveDirection.Left
               : mode_change.automove === "endline"
@@ -863,11 +854,12 @@ export class GlideModalEngine {
     // `editing-actions.mts` applies. `c` arrives as a `Delete` plus an
     // insert-mode transition; `dd`/`cc` arrive as `Range(Line)`.
 
-    // Custom Glide commands with no modalkit equivalent — still JS-registered.
-    this.set("normal", "x", "motion x");
-    this.set("normal", "X", "motion X");
+    // `x`/`X` (delete char) and `s` (substitute char) are native modalkit edits
+    // (`Delete`/change + `Column` motion) handled by the descriptor path, same
+    // as `dl`/`dh`. The remaining custom Glide commands with no modalkit
+    // equivalent stay JS-registered: `o` (open line), `I` (insert at first
+    // non-blank), `r` (replace), and the JS visual-mode shims.
     this.set("normal", "o", "motion o");
-    this.set("normal", "s", "motion s");
     this.set(["normal", "visual"], "I", "motion I");
     this.set("normal", "r", "r");
     this.set("normal", "h", "caret_move left");

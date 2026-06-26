@@ -482,7 +482,6 @@ export class GlideHandlerChild extends JSWindowActorChild<
         if (props.editing_action) {
           const handled = editing_actions.apply_editing_action(editor, props.editing_action, {
             mode: this.state?.mode ?? "normal",
-            operator: null,
           });
           if (handled) {
             switch (props.editing_action.operation) {
@@ -526,17 +525,6 @@ export class GlideHandlerChild extends JSWindowActorChild<
             this.#change_mode("insert");
             break;
           }
-          case "s": {
-            // caret is on the first line and it's empty
-            if (motions.is_bof(editor) && motions.next_char(editor) === "\n") {
-              return;
-            }
-
-            // `foo █ar baz` -> `foo█ar baz`
-            editor.deleteSelection(/* action */ editor.ePrevious!, /* stripWrappers */ editor.eStrip!);
-            this.#change_mode("insert");
-            break;
-          }
           case "vh": {
             if (editor.selection.isCollapsed) {
               motions.back_char(editor, true);
@@ -568,39 +556,6 @@ export class GlideHandlerChild extends JSWindowActorChild<
             editor.deleteSelection(editor.ePrevious!, editor.eStrip!);
 
             this.#change_mode("insert");
-            break;
-          }
-          case "x": {
-            if (
-              // caret is on the first line and it's empty
-              (motions.is_bof(editor) && motions.next_char(editor) === "\n")
-              // we don't want to delete newlines
-              || motions.current_char(editor) === "\n"
-            ) {
-              return;
-            }
-
-            // `foo █ar baz` -> `foo█ar baz`
-            editor.deleteSelection(/* action */ editor.ePrevious!, /* stripWrappers */ editor.eStrip!);
-
-            if (motions.next_char(editor) !== "\n") {
-              // `foo█ar baz` -> `foo █r baz`
-              editor.selectionController.characterMove(/* forward */ true, /* extend */ false);
-            }
-            break;
-          }
-          case "X": {
-            if (
-              // caret is on the first line and it's empty
-              (motions.is_bof(editor) && motions.next_char(editor) === "\n")
-              // we don't want to delete newlines
-              || motions.current_char(editor) === "\n"
-            ) {
-              return;
-            }
-
-            // `foo █ar baz` -> `foo█ar baz`
-            editor.deleteSelection(/* action */ editor.ePrevious!, /* stripWrappers */ editor.eStrip!);
             break;
           }
           case "o": {
@@ -648,16 +603,15 @@ export class GlideHandlerChild extends JSWindowActorChild<
   /**
    * Whether or not `.` should be updated to repeat this legacy per-key motion.
    *
-   * Only the custom Glide edits with no modalkit equivalent (`x`, `X`, `o`) go
-   * through here; descriptor-driven edits (`dw`, `cw`, …) are recorded as
-   * repeatable directly in the `motion` case based on their operation.
+   * Only the custom Glide edit `o` (open line) goes through here; descriptor-
+   * driven edits (`dw`, `cw`, `x`, `s`, …) are recorded as repeatable directly
+   * in the `motion` case based on their operation.
    */
   #motion_is_repeatable(
     keyseq: ParsedArg<GlideExcmdsMap["motion"]["args_schema"]["keyseq"]>,
   ): boolean {
     switch (keyseq) {
       case null:
-      case "s":
       case "v":
       case "vh":
       case "vl":
@@ -665,8 +619,6 @@ export class GlideHandlerChild extends JSWindowActorChild<
       case "vc":
       case "I":
         return false;
-      case "x":
-      case "X":
       case "o":
         return true;
       default:
@@ -783,9 +735,8 @@ export class GlideHandlerChild extends JSWindowActorChild<
   ) => Promise<ChildQueries[QueryName]["result"]> = this.sendQuery;
 
   #change_mode(mode: GlideMode, force: boolean = true): void {
-    this.state ??= { mode, operator: null };
+    this.state ??= { mode };
     this.state.mode = mode;
-    this.state.operator = null;
     this.send_async_message("Glide::ChangeMode", { mode, force });
     this._log.debug("new mode", this.state?.mode ?? "unset");
   }

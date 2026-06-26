@@ -11,7 +11,6 @@ import type {
   GlideCommandString,
   GlideExcmdInfo,
   GlideExcmdName,
-  GlideOperator,
 } from "./browser-excmds-registry.mts";
 import type { ParseResult } from "./utils/args.mjs";
 import type { ResolvedMappingNode, GlideEditingAction } from "./modal-engine.mts";
@@ -454,10 +453,10 @@ class GlideExcmdsClass {
 
       case "mode_change": {
         const { args } = this.#parse_command_args(command_meta, command);
-        const { mode, "--automove": automove, "--operator": operator } = args;
+        const { mode, "--automove": automove } = args;
         const current_mode = GlideBrowser.state.mode;
 
-        GlideBrowser._change_mode(mode, { operator });
+        GlideBrowser._change_mode(mode);
 
         // we only send the `caret_move` excmd if the focused element is editable as it should
         // be redundant otherwise, and may cause weird side effects like skipping back 5s in a
@@ -877,7 +876,7 @@ class GlideExcmdsClass {
           return;
         }
 
-        await GlideExcmds.execute("mode_change op-pending --operator=r");
+        await GlideExcmds.execute("mode_change op-pending");
 
         const event = await GlideBrowser.api.keys.next();
         if (!Keys.is_printable(event.glide_key)) {
@@ -987,14 +986,12 @@ class GlideExcmdsClass {
     command: ContentExcmd;
     args: string;
     sequence: string[];
-    operator?: GlideOperator | null;
     editing_action?: GlideEditingAction;
   }) {
     const actor = GlideBrowser.get_focused_actor();
     const opts: ParentMessages["Glide::ExecuteContentCommand"] = {
       command: props.command,
       args: props.args,
-      operator: props.operator ?? GlideBrowser.state.operator,
       sequence: props.sequence,
       editing_action: props.editing_action,
     };

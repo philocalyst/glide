@@ -23,7 +23,6 @@
  */
 
 import type { GlideEditingAction } from "./modal-engine.mts";
-import type { GlideOperator } from "./browser-excmds-registry.mts";
 
 const motions = ChromeUtils.importESModule("chrome://glide/content/motions.mjs");
 
@@ -36,7 +35,7 @@ const motions = ChromeUtils.importESModule("chrome://glide/content/motions.mjs")
 export function apply_editing_action(
   editor: nsIEditor,
   action: GlideEditingAction,
-  ctx: { mode: GlideMode; operator: GlideOperator | null },
+  ctx: { mode: GlideMode },
 ): boolean {
   let handled = false;
 
@@ -97,7 +96,7 @@ function apply_operation(editor: nsIEditor, action: GlideEditingAction): boolean
 function apply_motion_action(
   editor: nsIEditor,
   action: GlideEditingAction,
-  ctx: { mode: GlideMode; operator: GlideOperator | null },
+  ctx: { mode: GlideMode },
 ): boolean {
   const target = action.target;
   if (target.motion === undefined) {
@@ -144,7 +143,7 @@ function apply_motion_action(
 function apply_range_action(
   editor: nsIEditor,
   action: GlideEditingAction,
-  _ctx: { mode: GlideMode; operator: GlideOperator | null },
+  _ctx: { mode: GlideMode },
 ): boolean {
   const target = action.target;
   const range_kind = target.range;

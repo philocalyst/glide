@@ -94,13 +94,6 @@ impl GlideMode {
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize, uniffi::Enum)]
-pub enum PendingOperator {
-    Delete,
-    Change,
-    Replace,
-}
-
-#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize, uniffi::Enum)]
 pub enum AutomaticMoveDirection {
     Left,
     EndOfLine,
@@ -160,7 +153,6 @@ pub enum MotionIntent {
 pub enum EditorOperationIntent {
     Motion,
     Delete,
-    Change,
     Yank,
     Replace,
     RawDescription { description: String },
@@ -228,7 +220,6 @@ pub struct EditingActionIntent {
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize, uniffi::Record)]
 pub struct ModeChangeRequest {
     pub target_mode: GlideMode,
-    pub pending_operator: Option<PendingOperator>,
     pub automatic_move_direction: Option<AutomaticMoveDirection>,
 }
 
@@ -272,7 +263,6 @@ pub struct ResolvedKeyResult {
     pub pending_sequence_display: PendingSequenceDisplay,
     pub matched_mapping: bool,
     pub has_partial_match: bool,
-    pub operator: Option<PendingOperator>,
 }
 
 impl Default for ResolvedKeyResult {
@@ -286,14 +276,12 @@ impl Default for ResolvedKeyResult {
             },
             matched_mapping: false,
             has_partial_match: false,
-            operator: None,
         }
     }
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, uniffi::Enum)]
 pub enum EngineCommand {
-    RepeatLastAction,
     ChangeMode {
         request: ModeChangeRequest,
     },

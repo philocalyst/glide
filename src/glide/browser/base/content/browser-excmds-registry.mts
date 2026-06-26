@@ -56,13 +56,6 @@ export const MODE_SCHEMA_TYPE = {
   ] as GlideMode[],
 } as const satisfies ArgumentSchema["type"];
 
-export const OPERATOR_SCHEMA_TYPE = { enum: ["d", "c", "r"] } as const satisfies ArgumentSchema["type"];
-
-export type GlideOperator = ParsedArg<{
-  type: typeof OPERATOR_SCHEMA_TYPE;
-  required: true;
-}>;
-
 export const GLIDE_EXCOMMANDS = [
   { name: "back", description: "Go back one page in history", content: false, repeatable: true },
   { name: "forward", description: "Go forward one page in history", content: false, repeatable: true },
@@ -284,11 +277,6 @@ export const GLIDE_EXCOMMANDS = [
     args_schema: {
       mode: { type: MODE_SCHEMA_TYPE, required: true, position: 0 },
       "--automove": { type: { enum: ["left", "endline"] }, required: false },
-      "--operator": {
-        type: OPERATOR_SCHEMA_TYPE,
-        required: false,
-        description: "Only applicable for operator-pending mode",
-      },
     } as const satisfies ArgumentsSchema,
   },
 
@@ -427,19 +415,16 @@ export const GLIDE_EXCOMMANDS = [
       keyseq: {
         type: {
           // Only custom Glide motions with no modalkit equivalent remain here.
-          // The common vim motions (`w`/`e`/`b`/`$`/`0`/`^`/`{`/`}`) flow
-          // through the typed `editing_action` descriptor instead, where
-          // `keyseq` is unused.
+          // The vim motions and edits (`w`/`e`/`b`/`$`/`0`/`^`/`{`/`}`, `x`/`X`,
+          // `s`) flow through the typed `editing_action` descriptor instead,
+          // where `keyseq` is unused.
           enum: [
             "I",
-            "s",
             "v",
             "vh",
             "vl",
             "vd",
             "vc",
-            "x",
-            "X",
             "o",
           ],
         },

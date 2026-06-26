@@ -38,12 +38,6 @@ export enum CommandBarKind {
   Command,
 }
 
-export enum PendingOperator {
-  Delete,
-  Change,
-  Replace,
-}
-
 export enum AutomaticMoveDirection {
   Left,
   EndOfLine,
@@ -114,7 +108,6 @@ export type MotionIntent =
 export namespace EditorOperationIntent {
   export class Motion {}
   export class Delete {}
-  export class Change {}
   export class Yank {}
   export class Replace {}
   export class RawDescription {
@@ -125,7 +118,6 @@ export namespace EditorOperationIntent {
 export type EditorOperationIntent =
   | EditorOperationIntent.Motion
   | EditorOperationIntent.Delete
-  | EditorOperationIntent.Change
   | EditorOperationIntent.Yank
   | EditorOperationIntent.Replace
   | EditorOperationIntent.RawDescription;
@@ -226,7 +218,6 @@ export type BrowserCommandIntent =
   | BrowserCommandIntent.ApplyAutomaticMove;
 
 export namespace EngineCommand {
-  export class RepeatLastAction {}
   export class ChangeMode {
     request: ModeChangeRequest;
     constructor(fields: { request: ModeChangeRequest });
@@ -239,7 +230,6 @@ export namespace EngineCommand {
   }
 }
 export type EngineCommand =
-  | EngineCommand.RepeatLastAction
   | EngineCommand.ChangeMode
   | EngineCommand.DispatchBrowserCommand;
 
@@ -255,11 +245,9 @@ export class EditingActionIntent {
 
 export class ModeChangeRequest {
   targetMode: GlideMode;
-  pendingOperator: PendingOperator | null;
   automaticMoveDirection: AutomaticMoveDirection | null;
   constructor(fields: {
     targetMode: GlideMode;
-    pendingOperator?: PendingOperator | null;
     automaticMoveDirection?: AutomaticMoveDirection | null;
   });
 }
@@ -282,7 +270,6 @@ export class ResolvedKeyResult {
   pendingSequenceDisplay: PendingSequenceDisplay;
   matchedMapping: boolean;
   hasPartialMatch: boolean;
-  operator: PendingOperator | null;
 }
 
 export class KeymapDefinition {

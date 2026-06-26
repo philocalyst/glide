@@ -116,21 +116,23 @@ impl GlideModalEngine {
         let mut requested_mode: Option<GlideMode> = None;
 
         while let Some((action, edit_context)) = self.modal_machine.pop() {
-            match action {
-                Action::Repeat(repeat_type) => {
-                    self.modal_machine.repeat(repeat_type, Some(edit_context));
-                }
-                other_action => {
-                    emitted_any_action = true;
-                    self.translate_action(
-                        previous_mode,
-                        &other_action,
-                        &edit_context,
-                        &mut resolved_key_result,
-                        &mut requested_mode,
-                    );
-                }
+            // Dot-repeat is owned by the JS `#last_command` system: it must be
+            // able to replay custom/async excmds (e.g. `r`, whose replacement
+            // char is read in JS and never seen by modalkit), which modalkit's
+            // own repeat can't reconstruct. So modalkit's repeat is unused and
+            // we skip the action it would replay.
+            if matches!(action, Action::Repeat(_)) {
+                continue;
             }
+
+            emitted_any_action = true;
+            self.translate_action(
+                previous_mode,
+                &action,
+                &edit_context,
+                &mut resolved_key_result,
+                &mut requested_mode,
+            );
         }
 
         let modal_machine_mode = from_modalkit_mode(self.modal_machine.mode());
@@ -254,10 +256,8 @@ impl GlideModalEngine {
         resolved_key_result: &mut ResolvedKeyResult,
     ) {
         match command {
-            EngineCommand::RepeatLastAction => {}
             EngineCommand::ChangeMode { request } => {
                 let next_mode = request.target_mode;
-                resolved_key_result.operator = request.pending_operator;
                 if let Some(automatic_move_direction) = request.automatic_move_direction {
                     resolved_key_result.browser_command_intents.push(
                         BrowserCommandIntent::ApplyAutomaticMove {
@@ -391,7 +391,6 @@ impl GlideModalEngine {
         match application_action {
             GlideApplicationAction::ChangeMode(mode_change_request) => {
                 *requested_mode = Some(mode_change_request.target_mode);
-                resolved_key_result.operator = mode_change_request.pending_operator;
                 if let Some(automatic_move_direction) = mode_change_request.automatic_move_direction
                 {
                     resolved_key_result.browser_command_intents.push(

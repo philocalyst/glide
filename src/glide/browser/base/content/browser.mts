@@ -6,7 +6,7 @@
 import type { Split } from "type-fest";
 import type { GlideDocsParent } from "../../actors/GlideDocsParent.sys.mjs";
 import type { GlideHandlerParent } from "../../actors/GlideHandlerParent.sys.mjs";
-import type { GlideExcmdInfo, GlideOperator } from "./browser-excmds-registry.mts";
+import type { GlideExcmdInfo } from "./browser-excmds-registry.mts";
 import type { Messenger as MessengerType } from "./browser-messenger.mts";
 import type { Jumplist } from "./plugins/jumplist.mts";
 import type { Sandbox } from "./sandbox.mts";
@@ -45,7 +45,6 @@ declare var document: Document & { documentElement: HTMLElement };
 
 export interface State {
   mode: GlideMode;
-  operator: GlideOperator | null;
 }
 export interface StateChangeMeta {
   /* By default, when exiting visual mode we collapse the selection but for certain cases, e.g.
@@ -56,7 +55,7 @@ type ResolvedAddonCache = {
   addons: Record<string, { id: string }>;
 };
 
-const _defaultState: State = { mode: "normal", operator: null };
+const _defaultState: State = { mode: "normal" };
 
 export type StateChangeListener = (
   new_state: State,
@@ -256,7 +255,7 @@ class GlideBrowserClass {
 
     this.on_startup(async () => {
       await extension_startup;
-      await this.#state_change_autocmd(this.state, { mode: null, operator: null });
+      await this.#state_change_autocmd(this.state, { mode: null });
     });
 
     this.on_startup(async () => {
@@ -1378,11 +1377,10 @@ class GlideBrowserClass {
 
   _change_mode(
     new_mode: GlideMode,
-    props?: { operator?: GlideOperator | null; meta?: StateChangeMeta },
+    props?: { meta?: StateChangeMeta },
   ) {
     const old_state = { ...this.state };
     this.state.mode = new_mode;
-    this.state.operator = props?.operator ?? null;
 
     // Keep the modal engine in sync when the change originates outside the key
     // pipeline (excmd-driven `mode_change`, custom modes, sandbox). When the

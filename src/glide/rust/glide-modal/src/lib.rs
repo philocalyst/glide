@@ -43,7 +43,6 @@ mod tests {
             command: EngineCommand::ChangeMode {
                 request: ModeChangeRequest {
                     target_mode,
-                    pending_operator: None,
                     automatic_move_direction: None,
                 },
             },
@@ -138,6 +137,56 @@ mod tests {
             result.mode_transition.unwrap().next_mode,
             GlideMode::Insert
         );
+    }
+
+    #[test]
+    fn delete_char_x_resolves_to_typed_column_delete() {
+        // `x` is a native modalkit edit (`Delete` + `Column(Next)`), identical
+        // to `dl`, handled by the descriptor path rather than a JS per-key arm.
+        let bridge = GlideModalBridge::default();
+        let result = bridge.resolve_key_notation("x".into());
+
+        assert_eq!(
+            result.browser_command_intents,
+            vec![BrowserCommandIntent::ExecuteEditingAction {
+                editing_action: EditingActionIntent {
+                    operation: EditorOperationIntent::Delete,
+                    target: EditTargetIntent::Motion {
+                        motion: MotionIntent::Column {
+                            direction: MotionDirection::Next,
+                            wrap: false,
+                        },
+                        count: 1,
+                    },
+                },
+            }]
+        );
+        assert_eq!(bridge.current_mode_name(), GlideMode::Normal.as_str());
+    }
+
+    #[test]
+    fn substitute_char_s_resolves_to_delete_and_enters_insert() {
+        // `s` substitutes a char: `Delete` + `Column(Next)` plus a transition
+        // into insert mode (recovered JS-side as a `change` operation).
+        let bridge = GlideModalBridge::default();
+        let result = bridge.resolve_key_notation("s".into());
+
+        assert_eq!(
+            result.browser_command_intents,
+            vec![BrowserCommandIntent::ExecuteEditingAction {
+                editing_action: EditingActionIntent {
+                    operation: EditorOperationIntent::Delete,
+                    target: EditTargetIntent::Motion {
+                        motion: MotionIntent::Column {
+                            direction: MotionDirection::Next,
+                            wrap: false,
+                        },
+                        count: 1,
+                    },
+                },
+            }]
+        );
+        assert_eq!(result.mode_transition.unwrap().next_mode, GlideMode::Insert);
     }
 
     #[test]
@@ -288,29 +337,6 @@ mod tests {
         );
     }
 
-    #[test]
-    fn repeat_replays_last_modalkit_edit_sequence() {
-        let bridge = GlideModalBridge::default();
-        let _ = bridge.resolve_key_notation("d".into());
-        let _ = bridge.resolve_key_notation("w".into());
-
-        let repeated = bridge.resolve_key_notation(".".into());
-        assert_eq!(
-            repeated.browser_command_intents,
-            vec![BrowserCommandIntent::ExecuteEditingAction {
-                editing_action: EditingActionIntent {
-                    operation: EditorOperationIntent::Delete,
-                    target: EditTargetIntent::Motion {
-                        motion: MotionIntent::WordBegin {
-                            direction: MotionDirection::Next,
-                            word_style: WordStyleName::Little,
-                        },
-                        count: 1,
-                    },
-                },
-            }]
-        );
-    }
 
     #[test]
     fn insert_entry_emits_typed_automatic_move_intent() {
@@ -402,15 +428,6 @@ mod tests {
         let second = bridge.resolve_key_notation("t".into());
         assert_eq!(
             second.browser_command_intents,
-            vec![BrowserCommandIntent::ExecuteBrowserCommand {
-                command_name: "tab_next".into(),
-                arguments: vec![],
-            }]
-        );
-
-        let repeated = bridge.resolve_key_notation(".".into());
-        assert_eq!(
-            repeated.browser_command_intents,
             vec![BrowserCommandIntent::ExecuteBrowserCommand {
                 command_name: "tab_next".into(),
                 arguments: vec![],

@@ -3,7 +3,7 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-import type { ContentExcmd, GlideOperator } from "../base/content/browser-excmds-registry.mts";
+import type { ContentExcmd } from "../base/content/browser-excmds-registry.mts";
 import type { State, StateChangeListener, StateChangeMeta } from "../base/content/browser.mjs";
 import type { GlideFunctionIPC } from "../base/content/utils/ipc.mts";
 import type { GlideEditingAction } from "../base/content/modal-engine.mts";
@@ -29,12 +29,12 @@ export interface ParentMessages {
   "Glide::ExecuteContentCommand": {
     command: ContentExcmd;
     args: string;
-    operator: GlideOperator | null;
     sequence: string[];
     /**
-     * Typed editing-action descriptor (Stage A). When present, the content
-     * process routes through `editing-actions.mts::apply_editing_action`;
-     * otherwise the legacy per-key switch runs unchanged.
+     * Typed editing-action descriptor. When present, the content process
+     * applies it via `editing-actions.mts::apply_editing_action`; otherwise the
+     * legacy per-key switch runs (for the custom Glide motions with no modalkit
+     * equivalent).
      */
     editing_action?: GlideEditingAction;
   };
