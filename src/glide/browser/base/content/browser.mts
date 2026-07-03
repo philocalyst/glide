@@ -7,6 +7,7 @@ import type { Split } from "type-fest";
 import type { GlideDocsParent } from "../../actors/GlideDocsParent.sys.mjs";
 import type { GlideHandlerParent } from "../../actors/GlideHandlerParent.sys.mjs";
 import type { GlideExcmdInfo } from "./browser-excmds-registry.mts";
+import type { ProcessedKeyDisposition } from "./modal-engine.mts";
 import type { Messenger as MessengerType } from "./browser-messenger.mts";
 import type { Jumplist } from "./plugins/jumplist.mts";
 import type { Sandbox } from "./sandbox.mts";
@@ -1480,9 +1481,7 @@ class GlideBrowserClass {
    * display things like `di`, which wouldn't normally be displayed as it is not defined
    * as a single mapping, e.g. `diw`, but instead defined as `d` + `iw`.
    */
-  #current_display_keyseq: string[] = [];
   #display_keyseq(keyseq: string[]) {
-    this.#current_display_keyseq = keyseq;
     const element = document?.getElementById("glide-toolbar-keyseq-button");
     if (!element) {
       return;
@@ -1514,6 +1513,8 @@ class GlideBrowserClass {
    * I've only been able to get two timestamps to have a delta of ~0.07.
    */
   #passthrough_keyevents = new Set<number>();
+  /** Typed characters accumulating the current hint-label in hint mode. */
+  #hint_sequence: string[] = [];
   register_keyevent_passthrough(event: KeyboardEvent): void {
     this.#passthrough_keyevents.add(event.timeStamp);
   }
@@ -1605,91 +1606,80 @@ class GlideBrowserClass {
 
     const mode = this.state.mode;
     const has_partial = this.key_manager.has_partial_mapping;
-    const current_sequence = this.key_manager.current_sequence;
-    const mapping = this.key_manager.handle_key_event(event, mode);
-    if (mapping?.has_children || mapping?.value?.retain_key_display) {
-      this.#display_keyseq([...this.#current_display_keyseq, keyn]);
-    } else {
-      this.#display_keyseq([]);
-    }
+    const current_sequence = [...this.key_manager.current_sequence];
+    const disp: ProcessedKeyDisposition | null = this.key_manager.process_key(event);
 
-    if (!mapping && this.state.mode === "hint") {
-      var label: string;
-      var hints: GlideResolvedHint[];
-      if (current_sequence[current_sequence.length - 1] === "<CR>") {
-        label = current_sequence.slice(0, -1).join("");
+    this.#display_keyseq(disp?.sequenceDisplay ?? []);
+
+    // Modifier-only / dead keys produce no notation — let through.
+    if (!disp) return;
+
+    const { matchedMapping: is_hit, hasPartialMatch: is_partial } = disp;
+    const is_miss = !is_hit && !is_partial;
+
+    // Hint mode: label characters are not registered mappings; filter hints
+    // using a separate accumulator since Rust clears the sequence on a miss.
+    if (is_miss && this.state.mode === "hint") {
+      this.#hint_sequence.push(keyn);
+      let label: string;
+      let hints: GlideResolvedHint[];
+      if (this.#hint_sequence[this.#hint_sequence.length - 1] === "<CR>") {
+        label = this.#hint_sequence.slice(0, -1).join("");
         hints = GlideHints.get_active_hints().filter(hint => hint.label === label);
       } else {
-        label = [...current_sequence].join("");
+        label = this.#hint_sequence.join("");
         hints = GlideHints.get_active_hints().filter(hint => hint.label.startsWith(label));
       }
       this._log.debug({ hints, label });
 
       if (hints.length > 1) {
         this.#prevent_keydown(keyn, event);
-
         GlideHints.filter_hints(label);
         return;
       }
-
       if (hints.length === 1) {
         this.#prevent_keydown(keyn, event);
-
         GlideHints.execute(hints[0]!.id);
+        this.#hint_sequence = [];
         this.key_manager.reset_sequence();
         return;
       }
-
+      this.#hint_sequence = [];
       this.key_manager.reset_sequence();
       this._change_mode("normal");
       return;
     }
 
-    // if we were in a partial mapping and the current key does not match
-    // a mapping, then we need to clean up the partial mapping state and
-    // then crucially, *rerun* the event handling.
-    //
-    // this is important because it allows you to do things like cancelling a
-    // partial `jj` with an `Escape` and still have the `Escape` mapping applied.
-    if (has_partial && !mapping) {
+    // Partial-cancel-and-replay: was in a sequence but this key broke it.
+    // Rust already cleared the pending sequence on the miss; replay fresh.
+    if (has_partial && is_miss) {
       this.get_focused_actor().send_async_message("Glide::KeyMappingCancel", { mode });
-      this.key_manager.reset_sequence();
       await this.#on_keydown(event);
       return;
     }
 
-    if (!mapping) {
+    if (is_miss) {
       this.key_manager.reset_sequence();
-
-      // This event only makes sense to fire if the previous state was not of length 0.
       if (current_sequence.length !== 0) {
         this.#invoke_keystatechanged_autocmd({ mode, sequence: [], partial: false });
       }
-
       if (this.state.mode === "op-pending") {
         this._change_mode("normal");
-        return;
       }
-
-      // if a key mapping didn't match, just let it through.
       return;
     }
 
     this.#invoke_keystatechanged_autocmd({
       mode,
-      sequence: [...this.key_manager.current_sequence],
-      partial: mapping.has_children,
+      sequence: [...current_sequence, keyn],
+      partial: is_partial,
     });
 
-    this.#prevent_keydown(keyn, event);
+    if (disp.preventDefault) this.#prevent_keydown(keyn, event);
 
-    if (mapping.has_children) {
+    if (is_partial) {
       this.get_focused_actor().send_async_message("Glide::KeyMappingPartial", { mode, key: event.key });
-
       if (mode === "insert") {
-        // in insert mode, for any multi-sequence mappings, e.g. `jj` to `mode_change normal`,
-        // we need to clean up the previous state after some period of time, otherwise it's
-        // impossible to just type `jj`, you have to press another key in the middle.
         this.#partial_mapping_waiter_id = setTimeout(async () => {
           this.key_manager.reset_sequence();
           this.#display_keyseq([]);
@@ -1697,18 +1687,25 @@ class GlideBrowserClass {
           this.#invoke_keystatechanged_autocmd({ mode, sequence: [], partial: false });
         }, this.api.o.mapping_timeout);
       }
-    } else if (mapping.value) {
+    } else {
       this.key_manager.reset_sequence();
+      this.#hint_sequence = [];
       this.get_focused_actor().send_async_message("Glide::KeyMappingExecution", {
-        sequence: mapping.value.sequence,
+        sequence: [...current_sequence, keyn],
         mode,
       });
-      await GlideExcmds.execute(mapping.value.command, {
-        mapping,
-        editing_action: mapping.value.editing_action,
-      });
+      for (const instr of disp.instructions) {
+        if (instr.kind === "mode-change") {
+          this._change_mode(disp.modeTransition!);
+        } else if (instr.kind === "callback") {
+          await GlideExcmds.execute(instr.cb, {});
+        } else {
+          await GlideExcmds.execute(instr.command as glide.ExcmdString, {
+            editing_action: instr.editing_action,
+          });
+        }
+      }
     }
-
     return;
   }
 

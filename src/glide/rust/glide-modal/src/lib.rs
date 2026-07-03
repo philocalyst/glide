@@ -2,15 +2,15 @@ pub mod actions;
 pub mod bindings;
 pub mod bridge;
 pub mod engine;
+pub mod key;
 
 uniffi::setup_scaffolding!();
 
 #[cfg(test)]
 mod tests {
     use crate::actions::{
-        AutomaticMoveDirection, BrowserCommandIntent, EditTargetIntent, EditingActionIntent,
-        EditorOperationIntent, EngineCommand, GlideMode, KeymapDefinition, ModeChangeRequest,
-        MotionDirection, MotionIntent, RangeTargetIntent, WordStyleName,
+        AutomaticMoveDirection, BrowserCommandIntent, EngineCommand, GlideMode, KeymapDefinition,
+        ModeChangeRequest, WireEditingAction, WireEditingTarget,
     };
     use crate::bridge::GlideModalBridge;
 
@@ -23,11 +23,11 @@ mod tests {
             command: EngineCommand::DispatchBrowserCommand {
                 command_name: command_name.into(),
                 arguments: vec![],
-                is_repeatable: false,
             },
             retain_key_display: false,
             buffer: false,
             description: None,
+            custom_mode: None,
         }
     }
 
@@ -49,6 +49,7 @@ mod tests {
             retain_key_display: false,
             buffer: false,
             description: None,
+            custom_mode: None,
         }
     }
 
@@ -90,16 +91,133 @@ mod tests {
         assert_eq!(
             motion_result.browser_command_intents,
             vec![BrowserCommandIntent::ExecuteEditingAction {
-                editing_action: EditingActionIntent {
-                    // `d` set the pending operator in modalkit's context, so the
-                    // contextual operator resolves to a concrete `Delete`.
-                    operation: EditorOperationIntent::Delete,
-                    target: EditTargetIntent::Motion {
-                        motion: MotionIntent::WordBegin {
-                            direction: MotionDirection::Next,
-                            word_style: WordStyleName::Little,
-                        },
+                // `d` set the pending operator in modalkit's context, so the
+                // contextual operator resolves to a concrete `Delete`.
+                action: WireEditingAction {
+                    operation: "delete".into(),
+                    character: None,
+                    target: WireEditingTarget {
+                        kind: "motion".into(),
+                        motion: Some("word-begin".into()),
+                        direction: Some("next".into()),
+                        word_style: Some("little".into()),
                         count: 1,
+                        wrap: None,
+                        range: None,
+                        include_line_break: None,
+                        inclusive: None,
+                        left: None,
+                        right: None,
+                        quote: None,
+                        description: None,
+                    },
+                },
+            }]
+        );
+        assert_eq!(bridge.current_mode_name(), GlideMode::Normal.as_str());
+    }
+
+    #[test]
+    fn dot_repeats_last_edit_via_modalkit() {
+        let bridge = GlideModalBridge::default();
+        let _ = bridge.resolve_key_notation("d".into());
+        let _ = bridge.resolve_key_notation("w".into());
+
+        let repeated = bridge.resolve_key_notation(".".into());
+        assert_eq!(
+            repeated.browser_command_intents,
+            vec![BrowserCommandIntent::ExecuteEditingAction {
+                action: WireEditingAction {
+                    operation: "delete".into(),
+                    character: None,
+                    target: WireEditingTarget {
+                        kind: "motion".into(),
+                        motion: Some("word-begin".into()),
+                        direction: Some("next".into()),
+                        word_style: Some("little".into()),
+                        count: 1,
+                        wrap: None,
+                        range: None,
+                        include_line_break: None,
+                        inclusive: None,
+                        left: None,
+                        right: None,
+                        quote: None,
+                        description: None,
+                    },
+                },
+            }]
+        );
+    }
+
+    #[test]
+    fn dot_repeats_replace_with_its_char_via_modalkit() {
+        // The whole point of migrating `r` to modalkit: `.` re-emits the replace
+        // *including* the replacement char (recovered from the repeated context).
+        let bridge = GlideModalBridge::default();
+        let _ = bridge.resolve_key_notation("r".into());
+        let _ = bridge.resolve_key_notation("x".into());
+
+        let repeated = bridge.resolve_key_notation(".".into());
+        assert_eq!(
+            repeated.browser_command_intents,
+            vec![BrowserCommandIntent::ExecuteEditingAction {
+                action: WireEditingAction {
+                    operation: "replace".into(),
+                    character: Some("x".into()),
+                    target: WireEditingTarget {
+                        kind: "motion".into(),
+                        motion: Some("column".into()),
+                        direction: Some("next".into()),
+                        wrap: Some(false),
+                        count: 1,
+                        range: None,
+                        word_style: None,
+                        include_line_break: None,
+                        inclusive: None,
+                        left: None,
+                        right: None,
+                        quote: None,
+                        description: None,
+                    },
+                },
+            }]
+        );
+    }
+
+    #[test]
+    fn native_r_awaits_char_then_emits_replace() {
+        let bridge = GlideModalBridge::default();
+
+        // `r` enters modalkit's `CharReplaceSuffix` submode: Glide swallows the
+        // key, shows op-pending, and keeps `r` in the pending display.
+        let after_r = bridge.resolve_key_notation("r".into());
+        assert!(after_r.default_prevented);
+        assert_eq!(bridge.current_mode_name(), GlideMode::OperatorPending.as_str());
+        assert_eq!(after_r.pending_sequence_display.key_notations.as_slice(), ["r".to_string()]);
+
+        // The next key is the replacement char and yields a typed `Replace`.
+        let after_x = bridge.resolve_key_notation("x".into());
+        assert_eq!(
+            after_x.browser_command_intents,
+            vec![BrowserCommandIntent::ExecuteEditingAction {
+                action: WireEditingAction {
+                    operation: "replace".into(),
+                    character: Some("x".into()),
+                    target: WireEditingTarget {
+                        kind: "motion".into(),
+                        motion: Some("column".into()),
+                        direction: Some("next".into()),
+                        wrap: Some(false),
+                        count: 1,
+                        range: None,
+                        word_style: None,
+                        include_line_break: None,
+                        inclusive: None,
+                        left: None,
+                        right: None,
+                        quote: None,
+                        description: None,
                     },
                 },
             }]
@@ -121,14 +239,23 @@ mod tests {
         assert_eq!(
             result.browser_command_intents,
             vec![BrowserCommandIntent::ExecuteEditingAction {
-                editing_action: EditingActionIntent {
-                    operation: EditorOperationIntent::Delete,
-                    target: EditTargetIntent::Motion {
-                        motion: MotionIntent::WordEnd {
-                            direction: MotionDirection::Next,
-                            word_style: WordStyleName::Little,
-                        },
+                action: WireEditingAction {
+                    operation: "delete".into(),
+                    character: None,
+                    target: WireEditingTarget {
+                        kind: "motion".into(),
+                        motion: Some("word-end".into()),
+                        direction: Some("next".into()),
+                        word_style: Some("little".into()),
                         count: 1,
+                        wrap: None,
+                        range: None,
+                        include_line_break: None,
+                        inclusive: None,
+                        left: None,
+                        right: None,
+                        quote: None,
+                        description: None,
                     },
                 },
             }]
@@ -149,14 +276,23 @@ mod tests {
         assert_eq!(
             result.browser_command_intents,
             vec![BrowserCommandIntent::ExecuteEditingAction {
-                editing_action: EditingActionIntent {
-                    operation: EditorOperationIntent::Delete,
-                    target: EditTargetIntent::Motion {
-                        motion: MotionIntent::Column {
-                            direction: MotionDirection::Next,
-                            wrap: false,
-                        },
+                action: WireEditingAction {
+                    operation: "delete".into(),
+                    character: None,
+                    target: WireEditingTarget {
+                        kind: "motion".into(),
+                        motion: Some("column".into()),
+                        direction: Some("next".into()),
+                        wrap: Some(false),
                         count: 1,
+                        range: None,
+                        word_style: None,
+                        include_line_break: None,
+                        inclusive: None,
+                        left: None,
+                        right: None,
+                        quote: None,
+                        description: None,
                     },
                 },
             }]
@@ -174,14 +310,23 @@ mod tests {
         assert_eq!(
             result.browser_command_intents,
             vec![BrowserCommandIntent::ExecuteEditingAction {
-                editing_action: EditingActionIntent {
-                    operation: EditorOperationIntent::Delete,
-                    target: EditTargetIntent::Motion {
-                        motion: MotionIntent::Column {
-                            direction: MotionDirection::Next,
-                            wrap: false,
-                        },
+                action: WireEditingAction {
+                    operation: "delete".into(),
+                    character: None,
+                    target: WireEditingTarget {
+                        kind: "motion".into(),
+                        motion: Some("column".into()),
+                        direction: Some("next".into()),
+                        wrap: Some(false),
                         count: 1,
+                        range: None,
+                        word_style: None,
+                        include_line_break: None,
+                        inclusive: None,
+                        left: None,
+                        right: None,
+                        quote: None,
+                        description: None,
                     },
                 },
             }]
@@ -198,14 +343,23 @@ mod tests {
         assert_eq!(
             result.browser_command_intents,
             vec![BrowserCommandIntent::ExecuteEditingAction {
-                editing_action: EditingActionIntent {
-                    operation: EditorOperationIntent::Yank,
-                    target: EditTargetIntent::Motion {
-                        motion: MotionIntent::WordBegin {
-                            direction: MotionDirection::Next,
-                            word_style: WordStyleName::Little,
-                        },
+                action: WireEditingAction {
+                    operation: "yank".into(),
+                    character: None,
+                    target: WireEditingTarget {
+                        kind: "motion".into(),
+                        motion: Some("word-begin".into()),
+                        direction: Some("next".into()),
+                        word_style: Some("little".into()),
                         count: 1,
+                        wrap: None,
+                        range: None,
+                        include_line_break: None,
+                        inclusive: None,
+                        left: None,
+                        right: None,
+                        quote: None,
+                        description: None,
                     },
                 },
             }]
@@ -222,16 +376,25 @@ mod tests {
         assert_eq!(
             result.browser_command_intents,
             vec![BrowserCommandIntent::ExecuteEditingAction {
-                editing_action: EditingActionIntent {
-                    // No operator pending, so the contextual operator resolves to
-                    // the default `Motion` (a bare `3w` caret move).
-                    operation: EditorOperationIntent::Motion,
-                    target: EditTargetIntent::Motion {
-                        motion: MotionIntent::WordBegin {
-                            direction: MotionDirection::Next,
-                            word_style: WordStyleName::Little,
-                        },
+                // No operator pending, so the contextual operator resolves to
+                // the default `Motion` (a bare `3w` caret move).
+                action: WireEditingAction {
+                    operation: "motion".into(),
+                    character: None,
+                    target: WireEditingTarget {
+                        kind: "motion".into(),
+                        motion: Some("word-begin".into()),
+                        direction: Some("next".into()),
+                        word_style: Some("little".into()),
                         count: 3,
+                        wrap: None,
+                        range: None,
+                        include_line_break: None,
+                        inclusive: None,
+                        left: None,
+                        right: None,
+                        quote: None,
+                        description: None,
                     },
                 },
             }]
@@ -249,11 +412,23 @@ mod tests {
         assert_eq!(
             result.browser_command_intents,
             vec![BrowserCommandIntent::ExecuteEditingAction {
-                editing_action: EditingActionIntent {
-                    operation: EditorOperationIntent::Delete,
-                    target: EditTargetIntent::Motion {
-                        motion: MotionIntent::LineEnd,
+                action: WireEditingAction {
+                    operation: "delete".into(),
+                    character: None,
+                    target: WireEditingTarget {
+                        kind: "motion".into(),
+                        motion: Some("line-end".into()),
                         count: 0,
+                        direction: None,
+                        word_style: None,
+                        wrap: None,
+                        range: None,
+                        include_line_break: None,
+                        inclusive: None,
+                        left: None,
+                        right: None,
+                        quote: None,
+                        description: None,
                     },
                 },
             }]
@@ -274,14 +449,23 @@ mod tests {
         assert_eq!(
             result.browser_command_intents,
             vec![BrowserCommandIntent::ExecuteEditingAction {
-                editing_action: EditingActionIntent {
-                    operation: EditorOperationIntent::Delete,
-                    target: EditTargetIntent::Range {
-                        range: RangeTargetIntent::Word {
-                            word_style: WordStyleName::Little,
-                        },
-                        inclusive: true,
+                action: WireEditingAction {
+                    operation: "delete".into(),
+                    character: None,
+                    target: WireEditingTarget {
+                        kind: "range".into(),
+                        range: Some("word".into()),
+                        word_style: Some("little".into()),
+                        inclusive: Some(true),
                         count: 1,
+                        motion: None,
+                        direction: None,
+                        wrap: None,
+                        include_line_break: None,
+                        left: None,
+                        right: None,
+                        quote: None,
+                        description: None,
                     },
                 },
             }]
@@ -299,19 +483,63 @@ mod tests {
         assert_eq!(
             result.browser_command_intents,
             vec![BrowserCommandIntent::ExecuteEditingAction {
-                editing_action: EditingActionIntent {
-                    operation: EditorOperationIntent::Delete,
-                    target: EditTargetIntent::Range {
-                        range: RangeTargetIntent::Bracketed {
-                            left: "(".into(),
-                            right: ")".into(),
-                        },
-                        inclusive: false,
+                action: WireEditingAction {
+                    operation: "delete".into(),
+                    character: None,
+                    target: WireEditingTarget {
+                        kind: "range".into(),
+                        range: Some("bracketed".into()),
+                        left: Some("(".into()),
+                        right: Some(")".into()),
+                        inclusive: Some(false),
                         count: 1,
+                        motion: None,
+                        direction: None,
+                        wrap: None,
+                        word_style: None,
+                        include_line_break: None,
+                        quote: None,
+                        description: None,
                     },
                 },
             }]
         );
+    }
+
+    #[test]
+    fn open_line_below_emits_open_line_intent() {
+        let bridge = GlideModalBridge::default();
+        let result = bridge.resolve_key_notation("o".into());
+        assert!(result
+            .browser_command_intents
+            .contains(&BrowserCommandIntent::OpenLine { above: false }));
+        assert_eq!(bridge.current_mode_name(), GlideMode::Insert.as_str());
+    }
+
+    #[test]
+    fn open_line_above_emits_open_line_intent() {
+        let bridge = GlideModalBridge::default();
+        let result = bridge.resolve_key_notation("O".into());
+        assert!(result
+            .browser_command_intents
+            .contains(&BrowserCommandIntent::OpenLine { above: true }));
+    }
+
+    #[test]
+    fn dot_repeats_open_line_with_typed_text() {
+        // `.` after `o` + typing re-emits the open-line *and* the inserted text.
+        let bridge = GlideModalBridge::default();
+        let _ = bridge.resolve_key_notation("o".into());
+        let _ = bridge.resolve_key_notation("X".into());
+        let _ = bridge.resolve_key_notation("<Esc>".into());
+        let repeated = bridge.resolve_key_notation(".".into());
+
+        assert!(repeated
+            .browser_command_intents
+            .contains(&BrowserCommandIntent::OpenLine { above: false }));
+        assert!(repeated
+            .browser_command_intents
+            .contains(&BrowserCommandIntent::InsertText { text: "X".into() }));
     }
 
     #[test]
@@ -325,12 +553,23 @@ mod tests {
         assert_eq!(
             result.browser_command_intents,
             vec![BrowserCommandIntent::ExecuteEditingAction {
-                editing_action: EditingActionIntent {
-                    operation: EditorOperationIntent::Delete,
-                    target: EditTargetIntent::Range {
-                        range: RangeTargetIntent::Quote { quote: "\"".into() },
-                        inclusive: true,
+                action: WireEditingAction {
+                    operation: "delete".into(),
+                    character: None,
+                    target: WireEditingTarget {
+                        kind: "range".into(),
+                        range: Some("quote".into()),
+                        quote: Some("\"".into()),
+                        inclusive: Some(true),
                         count: 1,
+                        motion: None,
+                        direction: None,
+                        wrap: None,
+                        word_style: None,
+                        include_line_break: None,
+                        left: None,
+                        right: None,
+                        description: None,
                     },
                 },
             }]
@@ -415,11 +654,11 @@ mod tests {
             command: EngineCommand::DispatchBrowserCommand {
                 command_name: "tab_next".into(),
                 arguments: vec![],
-                is_repeatable: true,
             },
             retain_key_display: false,
             buffer: false,
             description: None,
+            custom_mode: None,
         });
 
         let first = bridge.resolve_key_notation("g".into());

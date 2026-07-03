@@ -1,213 +1,208 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at http://mozilla.org/MPL/2.0/.
+
 /**
- * Hand-written type contract for the uniffi-generated `RustGlideModal.sys.mjs`
- * module (produced from `src/glide/rust/glide-modal` by uniffi-bindgen-gecko-js).
+ * TypeScript type declarations for the uniffi-bindgen-gecko-js generated module
+ * `RustGlideModal.sys.mjs` (from the `glide_modal` Rust crate).
  *
- * The real module is generated at build time into
- * `toolkit/components/uniffi-bindgen-gecko-js/components/generated/RustGlideModal.sys.mjs`;
- * this declaration mirrors its public surface so the TypeScript sources can be
- * type-checked without the generated artifact present.
+ * uniffi conventions used here:
+ *   - C-like enums  → class with static readonly variant properties
+ *   - Data enums    → namespace containing one class per variant + union type
+ *   - Records       → class with a constructor that accepts a plain object
+ *   - Objects       → class (the bridge itself)
  *
- * Conventions encoded here follow uniffi-bindgen-gecko-js:
- *   - interface methods and record fields are lowerCamelCase
- *   - records are classes constructed from an object literal of their fields
- *   - fieldless enums are exported as frozen objects (member -> integer)
- *   - data-carrying enums are exported as a namespace of variant classes; an
- *     instance is one of those classes, discriminated via `instanceof`
- *
- * If a future uniffi version changes member casing or the enum representation,
- * this single file (and the thin adapter in `modal-engine.mts`) is where it is
- * reconciled.
+ * Rust snake_case field names become camelCase in the generated JS.
  */
 
-// ---------------------------------------------------------------------------
-// Fieldless enums
-// ---------------------------------------------------------------------------
+// ── C-like enums ─────────────────────────────────────────────────────────────
 
-export enum GlideMode {
-  Normal,
-  Insert,
-  Visual,
-  OperatorPending,
-  Ignore,
-  Command,
-  Hint,
+export declare class GlideMode {
+  private constructor();
+  static readonly Normal: GlideMode;
+  static readonly Insert: GlideMode;
+  static readonly Visual: GlideMode;
+  static readonly OperatorPending: GlideMode;
+  static readonly Ignore: GlideMode;
+  static readonly Command: GlideMode;
+  static readonly Hint: GlideMode;
 }
 
-export enum CommandBarKind {
-  Search,
-  Command,
+export declare class AutomaticMoveDirection {
+  private constructor();
+  static readonly Left: AutomaticMoveDirection;
+  static readonly EndOfLine: AutomaticMoveDirection;
 }
 
-export enum AutomaticMoveDirection {
-  Left,
-  EndOfLine,
+export declare class CommandBarKind {
+  private constructor();
+  static readonly Search: CommandBarKind;
+  static readonly Command: CommandBarKind;
 }
 
-export enum MotionDirection {
-  Previous,
-  Next,
+// ── Records (plain structured-clone-safe objects) ─────────────────────────────
+
+export declare class ModeChangeRequest {
+  readonly targetMode: GlideMode;
+  readonly automaticMoveDirection: AutomaticMoveDirection | null;
+  constructor(props: {
+    targetMode: GlideMode;
+    automaticMoveDirection: AutomaticMoveDirection | null;
+  });
 }
 
-export enum WordStyleName {
-  Little,
-  Big,
-  Keyword,
-  NonAlphanumeric,
+export declare class ModeTransition {
+  readonly previousMode: GlideMode;
+  readonly nextMode: GlideMode;
+  constructor(props: { previousMode: GlideMode; nextMode: GlideMode });
 }
 
-// ---------------------------------------------------------------------------
-// Data-carrying enums (variant classes discriminated via `instanceof`)
-// ---------------------------------------------------------------------------
-
-export namespace MotionIntent {
-  export class Column {
-    direction: MotionDirection;
-    wrap: boolean;
-    constructor(fields: { direction: MotionDirection; wrap: boolean });
-  }
-  export class LineStart {}
-  export class LineEnd {}
-  export class FirstWord {
-    direction: MotionDirection;
-    constructor(fields: { direction: MotionDirection });
-  }
-  export class Line {
-    direction: MotionDirection;
-    constructor(fields: { direction: MotionDirection });
-  }
-  export class WordBegin {
-    direction: MotionDirection;
-    wordStyle: WordStyleName;
-    constructor(fields: { direction: MotionDirection; wordStyle: WordStyleName });
-  }
-  export class WordEnd {
-    direction: MotionDirection;
-    wordStyle: WordStyleName;
-    constructor(fields: { direction: MotionDirection; wordStyle: WordStyleName });
-  }
-  export class ParagraphBegin {
-    direction: MotionDirection;
-    constructor(fields: { direction: MotionDirection });
-  }
-  export class RawDescription {
-    description: string;
-    constructor(fields: { description: string });
-  }
+export declare class PendingSequenceDisplay {
+  readonly keyNotations: string[];
+  constructor(props: { keyNotations: string[] });
 }
-export type MotionIntent =
-  | MotionIntent.Column
-  | MotionIntent.LineStart
-  | MotionIntent.LineEnd
-  | MotionIntent.FirstWord
-  | MotionIntent.Line
-  | MotionIntent.WordBegin
-  | MotionIntent.WordEnd
-  | MotionIntent.ParagraphBegin
-  | MotionIntent.RawDescription;
 
-export namespace EditorOperationIntent {
-  export class Motion {}
-  export class Delete {}
-  export class Yank {}
-  export class Replace {}
-  export class RawDescription {
-    description: string;
-    constructor(fields: { description: string });
-  }
-}
-export type EditorOperationIntent =
-  | EditorOperationIntent.Motion
-  | EditorOperationIntent.Delete
-  | EditorOperationIntent.Yank
-  | EditorOperationIntent.Replace
-  | EditorOperationIntent.RawDescription;
-
-export namespace EditTargetIntent {
-  export class CurrentPosition {}
-  export class CurrentSelection {}
-  export class LineRange {
+export declare class WireEditingTarget {
+  readonly kind: string;
+  readonly motion: string | null;
+  readonly range: string | null;
+  readonly count: number;
+  readonly direction: string | null;
+  readonly wordStyle: string | null;
+  readonly wrap: boolean | null;
+  readonly includeLineBreak: boolean | null;
+  readonly inclusive: boolean | null;
+  readonly left: string | null;
+  readonly right: string | null;
+  readonly quote: string | null;
+  readonly description: string | null;
+  constructor(props: {
+    kind: string;
+    motion?: string | null;
+    range?: string | null;
     count: number;
-    includeLineBreak: boolean;
-    constructor(fields: { count: number; includeLineBreak: boolean });
-  }
-  export class Motion {
-    motion: MotionIntent;
-    count: number;
-    constructor(fields: { motion: MotionIntent; count: number });
-  }
-  export class Range {
-    range: RangeTargetIntent;
-    inclusive: boolean;
-    count: number;
-    constructor(fields: { range: RangeTargetIntent; inclusive: boolean; count: number });
-  }
-  export class RawDescription {
-    description: string;
-    constructor(fields: { description: string });
-  }
+    direction?: string | null;
+    wordStyle?: string | null;
+    wrap?: boolean | null;
+    includeLineBreak?: boolean | null;
+    inclusive?: boolean | null;
+    left?: string | null;
+    right?: string | null;
+    quote?: string | null;
+    description?: string | null;
+  });
 }
-export type EditTargetIntent =
-  | EditTargetIntent.CurrentPosition
-  | EditTargetIntent.CurrentSelection
-  | EditTargetIntent.LineRange
-  | EditTargetIntent.Motion
-  | EditTargetIntent.Range
-  | EditTargetIntent.RawDescription;
 
-export namespace RangeTargetIntent {
-  export class Word {
-    wordStyle: WordStyleName;
-    constructor(fields: { wordStyle: WordStyleName });
-  }
-  export class Bracketed {
-    left: string;
-    right: string;
-    constructor(fields: { left: string; right: string });
-  }
-  export class Quote {
-    quote: string;
-    constructor(fields: { quote: string });
-  }
-  export class XmlTag {}
-  export class Paragraph {}
-  export class Sentence {}
-  export class Line {}
-  export class Buffer {}
-  export class Item {}
+export declare class WireEditingAction {
+  readonly operation: string;
+  readonly character: string | null;
+  readonly target: WireEditingTarget;
+  constructor(props: {
+    operation: string;
+    character?: string | null;
+    target: WireEditingTarget;
+  });
 }
-export type RangeTargetIntent =
-  | RangeTargetIntent.Word
-  | RangeTargetIntent.Bracketed
-  | RangeTargetIntent.Quote
-  | RangeTargetIntent.XmlTag
-  | RangeTargetIntent.Paragraph
-  | RangeTargetIntent.Sentence
-  | RangeTargetIntent.Line
-  | RangeTargetIntent.Buffer
-  | RangeTargetIntent.Item;
 
-export namespace BrowserCommandIntent {
-  export class ExecuteBrowserCommand {
-    commandName: string;
-    arguments: string[];
-    constructor(fields: { commandName: string; arguments: string[] });
+export declare class ResolvedKeyResult {
+  readonly defaultPrevented: boolean;
+  readonly modeTransition: ModeTransition | null;
+  readonly browserCommandIntents: BrowserCommandIntent[];
+  readonly pendingSequenceDisplay: PendingSequenceDisplay;
+  readonly matchedMapping: boolean;
+  readonly hasPartialMatch: boolean;
+  readonly matchedExcmd: string | null;
+  readonly matchedCallbackId: bigint | null;
+}
+
+export declare class KeymapDefinition {
+  readonly mode: GlideMode;
+  readonly sequence: string[];
+  readonly command: EngineCommand;
+  readonly retainKeyDisplay: boolean;
+  readonly buffer: boolean;
+  readonly description: string | null;
+  readonly customMode: string | null;
+  constructor(props: {
+    mode: GlideMode;
+    sequence: string[];
+    command: EngineCommand;
+    retainKeyDisplay?: boolean;
+    buffer?: boolean;
+    description?: string | null;
+    customMode?: string | null;
+  });
+}
+
+export declare class KeyEventInfo {
+  readonly key: string;
+  readonly code: string;
+  readonly ctrl: boolean;
+  readonly alt: boolean;
+  readonly shift: boolean;
+  readonly meta: boolean;
+  constructor(props: {
+    key: string;
+    code: string;
+    ctrl: boolean;
+    alt: boolean;
+    shift: boolean;
+    meta: boolean;
+  });
+}
+
+export declare class KeyDisposition {
+  readonly preventDefault: boolean;
+  readonly sequenceDisplay: string[];
+  readonly modeTransition: ModeTransition | null;
+  readonly armTimeoutMs: bigint | null;
+  readonly notifyContent: ContentNotification[];
+  readonly instructions: Instruction[];
+  readonly matchedMapping: boolean;
+  readonly hasPartialMatch: boolean;
+}
+
+export declare class ExcmdInfo {
+  readonly name: string;
+  readonly description: string;
+  readonly contentFlag: boolean;
+  readonly repeatable: boolean;
+}
+
+export declare class ParsedExcmd {
+  readonly name: string;
+  readonly arguments: string[];
+  constructor(props: { name: string; arguments: string[] });
+}
+
+// ── Data enums (namespace + variant classes) ──────────────────────────────────
+
+export declare namespace BrowserCommandIntent {
+  export declare class ExecuteBrowserCommand {
+    readonly commandName: string;
+    readonly arguments: string[];
+    constructor(props: { commandName: string; arguments: string[] });
   }
-  export class ExecuteEditingAction {
-    editingAction: EditingActionIntent;
-    constructor(fields: { editingAction: EditingActionIntent });
+  export declare class ExecuteEditingAction {
+    readonly action: WireEditingAction;
+    constructor(props: { action: WireEditingAction });
   }
-  export class OpenCommandBar {
-    promptPrefix: string;
-    commandBarKind: CommandBarKind;
-    constructor(fields: { promptPrefix: string; commandBarKind: CommandBarKind });
+  export declare class OpenCommandBar {
+    readonly promptPrefix: string;
+    readonly commandBarKind: CommandBarKind;
+    constructor(props: { promptPrefix: string; commandBarKind: CommandBarKind });
   }
-  export class InsertText {
-    text: string;
-    constructor(fields: { text: string });
+  export declare class InsertText {
+    readonly text: string;
+    constructor(props: { text: string });
   }
-  export class ApplyAutomaticMove {
-    automaticMoveDirection: AutomaticMoveDirection;
-    constructor(fields: { automaticMoveDirection: AutomaticMoveDirection });
+  export declare class ApplyAutomaticMove {
+    readonly automaticMoveDirection: AutomaticMoveDirection;
+    constructor(props: { automaticMoveDirection: AutomaticMoveDirection });
+  }
+  export declare class OpenLine {
+    readonly above: boolean;
+    constructor(props: { above: boolean });
   }
 }
 export type BrowserCommandIntent =
@@ -215,100 +210,173 @@ export type BrowserCommandIntent =
   | BrowserCommandIntent.ExecuteEditingAction
   | BrowserCommandIntent.OpenCommandBar
   | BrowserCommandIntent.InsertText
-  | BrowserCommandIntent.ApplyAutomaticMove;
+  | BrowserCommandIntent.ApplyAutomaticMove
+  | BrowserCommandIntent.OpenLine;
 
-export namespace EngineCommand {
-  export class ChangeMode {
-    request: ModeChangeRequest;
-    constructor(fields: { request: ModeChangeRequest });
+export declare namespace EngineCommand {
+  export declare class ChangeMode {
+    readonly request: ModeChangeRequest;
+    constructor(props: { request: ModeChangeRequest });
   }
-  export class DispatchBrowserCommand {
-    commandName: string;
-    arguments: string[];
-    isRepeatable: boolean;
-    constructor(fields: { commandName: string; arguments: string[]; isRepeatable: boolean });
+  export declare class DispatchBrowserCommand {
+    readonly commandName: string;
+    readonly arguments: string[];
+    constructor(props: { commandName: string; arguments: string[] });
+  }
+  export declare class Callback {
+    readonly callbackId: bigint;
+    constructor(props: { callbackId: bigint });
   }
 }
 export type EngineCommand =
   | EngineCommand.ChangeMode
-  | EngineCommand.DispatchBrowserCommand;
+  | EngineCommand.DispatchBrowserCommand
+  | EngineCommand.Callback;
 
-// ---------------------------------------------------------------------------
-// Records
-// ---------------------------------------------------------------------------
-
-export class EditingActionIntent {
-  operation: EditorOperationIntent;
-  target: EditTargetIntent;
-  constructor(fields: { operation: EditorOperationIntent; target: EditTargetIntent });
+export declare namespace InsertOp {
+  export declare class OpenLine {
+    readonly above: boolean;
+    constructor(props: { above: boolean });
+  }
+  export declare class AutoMove {
+    readonly direction: AutomaticMoveDirection;
+    constructor(props: { direction: AutomaticMoveDirection });
+  }
+  export declare class InsertText {
+    readonly text: string;
+    constructor(props: { text: string });
+  }
+  export declare class MoveToColumn {
+    readonly action: WireEditingAction;
+    constructor(props: { action: WireEditingAction });
+  }
 }
+export type InsertOp =
+  | InsertOp.OpenLine
+  | InsertOp.AutoMove
+  | InsertOp.InsertText
+  | InsertOp.MoveToColumn;
 
-export class ModeChangeRequest {
-  targetMode: GlideMode;
-  automaticMoveDirection: AutomaticMoveDirection | null;
-  constructor(fields: {
-    targetMode: GlideMode;
-    automaticMoveDirection?: AutomaticMoveDirection | null;
-  });
+export declare namespace Instruction {
+  export declare class Excmd {
+    readonly command: string;
+    readonly arguments: string[];
+    constructor(props: { command: string; arguments: string[] });
+  }
+  export declare class Callback {
+    readonly callbackId: bigint;
+    readonly sequence: string[];
+    constructor(props: { callbackId: bigint; sequence: string[] });
+  }
+  export declare class EditingAction {
+    readonly action: WireEditingAction;
+    constructor(props: { action: WireEditingAction });
+  }
+  export declare class OpenCommandBar {
+    readonly prefix: string;
+    constructor(props: { prefix: string });
+  }
+  export declare class HintFilter {
+    readonly label: string;
+    constructor(props: { label: string });
+  }
+  export declare class HintExecute {
+    readonly id: bigint;
+    constructor(props: { id: bigint });
+  }
+  export declare class HintExit {
+    constructor();
+  }
+  export declare class InsertSequence {
+    readonly ops: InsertOp[];
+    readonly entersInsert: boolean;
+    constructor(props: { ops: InsertOp[]; entersInsert: boolean });
+  }
 }
+export type Instruction =
+  | Instruction.Excmd
+  | Instruction.Callback
+  | Instruction.EditingAction
+  | Instruction.OpenCommandBar
+  | Instruction.HintFilter
+  | Instruction.HintExecute
+  | Instruction.HintExit
+  | Instruction.InsertSequence;
 
-export class ModeTransition {
-  previousMode: GlideMode;
-  nextMode: GlideMode;
-  constructor(fields: { previousMode: GlideMode; nextMode: GlideMode });
+export declare namespace ContentNotification {
+  export declare class KeyMappingPartial {
+    readonly sequence: string[];
+    constructor(props: { sequence: string[] });
+  }
+  export declare class KeyMappingComplete {
+    constructor();
+  }
+  export declare class Cancel {
+    constructor();
+  }
+  export declare class ModeChanged {
+    readonly mode: string;
+    constructor(props: { mode: string });
+  }
 }
+export type ContentNotification =
+  | ContentNotification.KeyMappingPartial
+  | ContentNotification.KeyMappingComplete
+  | ContentNotification.Cancel
+  | ContentNotification.ModeChanged;
 
-export class PendingSequenceDisplay {
-  keyNotations: string[];
-  constructor(fields: { keyNotations: string[] });
+export declare namespace ExcmdParseError {
+  export declare class EmptyInput {
+    constructor();
+  }
+  export declare class UnknownCommand {
+    readonly name: string;
+    constructor(props: { name: string });
+  }
 }
+export type ExcmdParseError =
+  | ExcmdParseError.EmptyInput
+  | ExcmdParseError.UnknownCommand;
 
-export class ResolvedKeyResult {
-  defaultPrevented: boolean;
-  modeTransition: ModeTransition | null;
-  browserCommandIntents: BrowserCommandIntent[];
-  pendingSequenceDisplay: PendingSequenceDisplay;
-  matchedMapping: boolean;
-  hasPartialMatch: boolean;
-}
+// ── The bridge object ─────────────────────────────────────────────────────────
 
-export class KeymapDefinition {
-  mode: GlideMode;
-  sequence: string[];
-  command: EngineCommand;
-  retainKeyDisplay: boolean;
-  buffer: boolean;
-  description: string | null;
-  constructor(fields: {
-    mode: GlideMode;
-    sequence: string[];
-    command: EngineCommand;
-    retainKeyDisplay?: boolean;
-    buffer?: boolean;
-    description?: string | null;
-  });
-}
-
-// ---------------------------------------------------------------------------
-// The interface object — the single authority over Glide's modal state.
-// ---------------------------------------------------------------------------
-
-export class GlideModalBridge {
+export declare class GlideModalBridge {
   constructor();
 
+  // Mode
   currentModeName(): string;
   setMode(mode: GlideMode): void;
-
-  currentSequence(): string[];
-  resetSequence(): void;
-
   modeCaretStyle(mode: GlideMode): number;
   modeNames(): string[];
 
-  listKeymaps(mode: GlideMode): KeymapDefinition[];
+  // Sequence
+  currentSequence(): string[];
+  resetSequence(): void;
+
+  // Key resolution (legacy path)
+  keyNotationFromEvent(event: KeyEventInfo): string | null;
+  resolveKeyNotation(keyNotation: string): ResolvedKeyResult;
+
+  // Key resolution (Phase 5: full driver)
+  processKey(event: KeyEventInfo): KeyDisposition | null;
+
+  // Keymaps
   setKeymap(keymapDefinition: KeymapDefinition): void;
   delKeymap(mode: GlideMode, sequence: string[], buffer: boolean): void;
   clearBuffer(): void;
+  listKeymaps(mode: GlideMode): KeymapDefinition[];
 
-  resolveKeyNotation(keyNotation: string): ResolvedKeyResult;
+  // Custom modes (Phase 4)
+  registerCustomMode(modeName: string, caretStyle: number): void;
+  setCustomMode(modeName: string): void;
+  currentCustomMode(): string | null;
+  customModeCaretStyle(modeName: string): number | null;
+  setCustomKeymap(keymapDefinition: KeymapDefinition): void;
+  delCustomKeymap(modeName: string, sequence: string[]): void;
+
+  // Excmd registry + dot-repeat (Phase 6)
+  excmdRegistry(): ExcmdInfo[];
+  parseExcmd(input: string): ParsedExcmd;
+  noteExecuted(parsed: ParsedExcmd): void;
+  repeatLast(): ParsedExcmd | null;
 }

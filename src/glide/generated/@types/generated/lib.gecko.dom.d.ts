@@ -18202,6 +18202,22 @@ declare var ReadableByteStreamController: {
     isInstance: IsInstance<ReadableByteStreamController>;
 };
 
+interface ReadableStream {
+    readonly locked: boolean;
+    cancel(reason?: any): Promise<void>;
+    getReader(options?: ReadableStreamGetReaderOptions): ReadableStreamReader;
+    pipeThrough(transform: ReadableWritablePair, options?: StreamPipeOptions): ReadableStream;
+    pipeTo(destination: WritableStream, options?: StreamPipeOptions): Promise<void>;
+    tee(): ReadableStream[];
+}
+
+declare var ReadableStream: {
+    prototype: ReadableStream;
+    new(underlyingSource?: any, strategy?: QueuingStrategy): ReadableStream;
+    isInstance: IsInstance<ReadableStream>;
+    from(asyncIterable: any): ReadableStream;
+};
+
 interface ReadableStreamBYOBReader extends ReadableStreamGenericReader {
     read(view: ArrayBufferView, options?: ReadableStreamBYOBReaderReadOptions): Promise<ReadableStreamReadResult>;
     releaseLock(): void;
@@ -26083,7 +26099,6 @@ declare var XULCommandEvent: {
 };
 
 interface XULElementEventMap extends ElementEventMap, GlobalEventHandlersEventMap, OnErrorEventHandlerForNodesEventMap, TouchEventHandlersEventMap {
-    keypress: KeyboardEvent
 }
 
 interface XULElement extends Element, ElementCSSInlineStyle, ElementOffsetAttributes, GlobalEventHandlers, HTMLOrForeignElement, OnErrorEventHandlerForNodes, TouchEventHandlers {
@@ -28445,6 +28460,11 @@ interface FileSystemDirectoryHandle {
     entries(): AsyncIterableIterator<[string, FileSystemHandle]>;
     keys(): AsyncIterableIterator<string>;
     values(): AsyncIterableIterator<FileSystemHandle>;
+}
+
+interface ReadableStream {
+    [Symbol.asyncIterator](options?: ReadableStreamIteratorOptions): AsyncIterableIterator<any>;
+    values(options?: ReadableStreamIteratorOptions): AsyncIterableIterator<any>;
 }
 
 interface TestInterfaceAsyncIterableDouble {

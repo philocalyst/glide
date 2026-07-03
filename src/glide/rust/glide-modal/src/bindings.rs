@@ -64,7 +64,10 @@ pub fn is_displayable_partial_match(
     }
 
     custom_keymaps.iter().any(|keymap_definition| {
-        keymap_definition.mode == mode
+        // Custom-mode keymaps are resolved outside modalkit; never treat them
+        // as partial matches for built-in modes.
+        keymap_definition.custom_mode.is_none()
+            && keymap_definition.mode == mode
             && keymap_definition
                 .sequence
                 .as_slice()
@@ -77,6 +80,12 @@ fn add_keymap_definition(
     modal_machine: &mut VimMachine<TerminalKey, GlideApplicationInfo>,
     keymap_definition: &KeymapDefinition,
 ) {
+    // Custom-mode keymaps are resolved by `GlideModalEngine::resolve_in_custom_mode`
+    // outside the modalkit state machine; registering them here would be wrong.
+    if keymap_definition.custom_mode.is_some() {
+        return;
+    }
+
     // Glide's key notation is a superset of what modalkit's `TerminalKey` can
     // parse (e.g. the `<D-…>` super modifier). If any key in the sequence can't
     // be represented, skip registering rather than panicking — the modal layer
@@ -117,13 +126,16 @@ fn keymap_definition_to_input_step(
         EngineCommand::DispatchBrowserCommand {
             command_name,
             arguments,
-            is_repeatable,
         } => InputStep::new().actions(vec![Action::Application(
             GlideApplicationAction::DispatchBrowserCommand {
                 command_name: command_name.clone(),
                 arguments: arguments.clone(),
-                is_repeatable: *is_repeatable,
             },
         )]),
+        EngineCommand::Callback { callback_id } => InputStep::new().actions(vec![
+            Action::Application(GlideApplicationAction::Callback {
+                callback_id: *callback_id,
+            }),
+        ]),
     }
 }

@@ -48,7 +48,6 @@ export interface ParentMessages {
   };
   "Glide::SelectionCollapse": {};
   "Glide::KeyMappingCancel": { mode: GlideMode };
-  "Glide::ReplaceChar": { character: string };
   "Glide::BlurActiveElement": null;
   "Glide::ExecuteHint": { id: number };
   "Glide::Hint": {
@@ -192,11 +191,6 @@ export class GlideHandlerParent extends JSWindowActorParent<
 
         this.#log.debug("changing mode", message.data);
         this.glide_browser?._change_mode(message.data.mode);
-        break;
-      }
-
-      case "Glide::RecordRepeatableCommand": {
-        this.glide_excmds!.add_to_command_history({ type: "content-cmd", props: message.data });
         break;
       }
 

@@ -88,8 +88,25 @@ function is_builtin_mode(mode: GlideMode): boolean {
  * operations; text objects (`EditTarget::Range`/`Boundary`) remain on the
  * `RawDescription` fallback until Stage B.
  */
+/**
+ * One primitive step of an insert-entry / dot-repeated insert session
+ * (`o`/`O`/`i`/`a`/`A`/`I` and their `.` replays). The content executor applies
+ * these in order, then settles into the final mode.
+ */
+export type GlideInsertOp =
+  | { kind: "open_line"; above: boolean }
+  | { kind: "automove"; direction: "left" | "endline" }
+  | { kind: "insert_text"; text: string }
+  | { kind: "move"; target: GlideEditingAction["target"] };
+
 export interface GlideEditingAction {
-  operation: "motion" | "delete" | "change" | "yank" | "replace" | "raw";
+  operation: "motion" | "delete" | "change" | "yank" | "replace" | "insert" | "raw";
+  /** Replacement character for the `replace` operation (`r{char}`). */
+  character?: string;
+  /** Ordered steps for the `insert` operation (insert-entry / `.` replay). */
+  ops?: GlideInsertOp[];
+  /** For the `insert` operation: whether to end in insert mode (live entry) or normal (`.` replay). */
+  entersInsert?: boolean;
   target: {
     kind: "current-position" | "current-selection" | "line-range" | "motion" | "range" | "raw";
     motion?:
@@ -126,33 +143,21 @@ export interface GlideEditingAction {
   };
 }
 
-/**
- * A minimal trie-node-shaped result returned by {@link GlideModalEngine.handle_key_event}.
- *
- * `browser.mts` was written against the previous trie-based `KeyManager` and
- * branches on these fields; we synthesize the same shape from the Rust
- * resolution result so that consumer remains unchanged.
- */
-export interface ResolvedMappingNode {
-  /** A longer mapping starts with the current sequence; wait for more keys. */
-  has_children: boolean;
-  value:
-    | {
-      sequence: string[];
-      command: glide.ExcmdValue;
-      retain_key_display: boolean;
-      deleted: boolean;
-      description: string | undefined;
-      /**
-       * Typed editing action descriptor built from the Rust
-       * `ExecuteEditingAction` intent. Forwarded to the content process so the
-       * descriptor-driven executor (`editing-actions.mts`) can apply counts and
-       * operator×motion composition. Absent for commands that have no typed
-       * descriptor (e.g. plain excmds); the legacy per-key path then runs.
-       */
-      editing_action?: GlideEditingAction;
-    }
-    | null;
+/** A fully-resolved instruction returned by {@link GlideModalEngine.process_key}. */
+export type ProcessedInstruction =
+  | { kind: "excmd"; command: string; editing_action?: GlideEditingAction }
+  | { kind: "callback"; cb: glide.ExcmdValue; sequence: string[] }
+  | { kind: "mode-change" };
+
+/** Fully-translated result of {@link GlideModalEngine.process_key}. */
+export interface ProcessedKeyDisposition {
+  preventDefault: boolean;
+  sequenceDisplay: string[];
+  /** Next mode as a TS string, or null if no transition. */
+  modeTransition: GlideMode | null;
+  matchedMapping: boolean;
+  hasPartialMatch: boolean;
+  instructions: ProcessedInstruction[];
 }
 
 interface RegistryEntry {
@@ -164,6 +169,8 @@ interface RegistryEntry {
   retain_key_display: boolean;
   buffer: boolean;
   deleted: boolean;
+  /** Set when `rhs` is a JS callback registered for a built-in mode. */
+  callback_id?: number;
 }
 
 function registry_key(mode: GlideMode, sequence: string[]): string {
@@ -175,171 +182,6 @@ interface ParsedModeChange {
   automove: "left" | "endline" | null;
 }
 
-function rust_motion_direction(dir: RustGlideModalT.MotionDirection): "previous" | "next" {
-  return dir === RustGlideModal.MotionDirection.Next ? "next" : "previous";
-}
-
-function rust_word_style(style: RustGlideModalT.WordStyleName): GlideEditingAction["target"]["wordStyle"] {
-  switch (style) {
-    case RustGlideModal.WordStyleName.Little:
-      return "little";
-    case RustGlideModal.WordStyleName.Big:
-      return "big";
-    case RustGlideModal.WordStyleName.Keyword:
-      return "keyword";
-    case RustGlideModal.WordStyleName.NonAlphanumeric:
-      return "non-alphanumeric";
-    default:
-      return "little";
-  }
-}
-
-/**
- * Convert a Rust `MotionIntent` into the plain `motion` kind string used by
- * `GlideEditingAction`. Returns `undefined` for variants the content executor
- * doesn't handle yet (Stage A covers the common vim motions).
- */
-function motion_kind_from_intent(motion: RustGlideModalT.MotionIntent): GlideEditingAction["target"]["motion"] | undefined {
-  if (motion instanceof RustGlideModal.MotionIntent.Column) return "column";
-  if (motion instanceof RustGlideModal.MotionIntent.LineStart) return "line-start";
-  if (motion instanceof RustGlideModal.MotionIntent.LineEnd) return "line-end";
-  if (motion instanceof RustGlideModal.MotionIntent.FirstWord) return "first-word";
-  if (motion instanceof RustGlideModal.MotionIntent.Line) return "line";
-  if (motion instanceof RustGlideModal.MotionIntent.WordBegin) return "word-begin";
-  if (motion instanceof RustGlideModal.MotionIntent.WordEnd) return "word-end";
-  if (motion instanceof RustGlideModal.MotionIntent.ParagraphBegin) return "paragraph-begin";
-  if (motion instanceof RustGlideModal.MotionIntent.RawDescription) return "raw";
-  return undefined;
-}
-
-/**
- * Convert a Rust `RangeTargetIntent` into the plain `range` kind string used by
- * `GlideEditingAction`. Returns `undefined` for variants the content executor
- * doesn't handle yet.
- */
-function range_kind_from_intent(range: RustGlideModalT.RangeTargetIntent): GlideEditingAction["target"]["range"] | undefined {
-  if (range instanceof RustGlideModal.RangeTargetIntent.Word) return "word";
-  if (range instanceof RustGlideModal.RangeTargetIntent.Bracketed) return "bracketed";
-  if (range instanceof RustGlideModal.RangeTargetIntent.Quote) return "quote";
-  if (range instanceof RustGlideModal.RangeTargetIntent.XmlTag) return "xml-tag";
-  if (range instanceof RustGlideModal.RangeTargetIntent.Paragraph) return "paragraph";
-  if (range instanceof RustGlideModal.RangeTargetIntent.Sentence) return "sentence";
-  if (range instanceof RustGlideModal.RangeTargetIntent.Line) return "line";
-  if (range instanceof RustGlideModal.RangeTargetIntent.Buffer) return "buffer";
-  if (range instanceof RustGlideModal.RangeTargetIntent.Item) return "item";
-  return undefined;
-}
-
-/**
- * Convert a Rust `EditingActionIntent` into a plain, structured-clone-safe
- * `GlideEditingAction`. Returns `undefined` when the intent doesn't carry a
- * typed descriptor the content executor can consume; the caller then falls
- * back to the legacy per-key path.
- *
- * The operator is already resolved by the Rust engine from modalkit's context
- * (so `dw` arrives as `Delete`, `yw` as `Yank`). `enters_insert` reflects an
- * accompanying transition into insert mode, which is how `c` (change) is
- * distinguished from `d` (delete) — modalkit models `c` as a `Delete` plus an
- * insert-mode transition rather than a distinct edit action.
- */
-function editing_action_from_intent(
-  intent: RustGlideModalT.EditingActionIntent,
-  enters_insert: boolean,
-): GlideEditingAction | undefined {
-  let operation: GlideEditingAction["operation"];
-  const op = intent.operation;
-  if (op instanceof RustGlideModal.EditorOperationIntent.Motion) {
-    operation = "motion";
-  } else if (op instanceof RustGlideModal.EditorOperationIntent.Delete) {
-    // A delete that also drops into insert mode is a `change` (`cw`, `cc`).
-    operation = enters_insert ? "change" : "delete";
-  } else if (op instanceof RustGlideModal.EditorOperationIntent.Yank) {
-    operation = "yank";
-  } else {
-    // `Replace` / `RawDescription` aren't routed through the descriptor
-    // executor yet; fall back to the legacy per-key path.
-    return undefined;
-  }
-
-  const target = intent.target;
-  if (target instanceof RustGlideModal.EditTargetIntent.Motion) {
-    const motion_kind = motion_kind_from_intent(target.motion);
-    if (motion_kind === undefined || motion_kind === "raw") {
-      return undefined;
-    }
-
-    const action: GlideEditingAction = {
-      operation,
-      target: {
-        kind: "motion",
-        motion: motion_kind,
-        count: target.count,
-      },
-    };
-
-    // Attach variant-specific fields so the executor can pick the right offset
-    // primitive.
-    const m = target.motion;
-    if (m instanceof RustGlideModal.MotionIntent.Column) {
-      action.target.direction = rust_motion_direction(m.direction);
-      action.target.wrap = m.wrap;
-    } else if (m instanceof RustGlideModal.MotionIntent.FirstWord) {
-      action.target.direction = rust_motion_direction(m.direction);
-    } else if (m instanceof RustGlideModal.MotionIntent.Line) {
-      action.target.direction = rust_motion_direction(m.direction);
-    } else if (m instanceof RustGlideModal.MotionIntent.WordBegin) {
-      action.target.direction = rust_motion_direction(m.direction);
-      action.target.wordStyle = rust_word_style(m.wordStyle);
-    } else if (m instanceof RustGlideModal.MotionIntent.WordEnd) {
-      action.target.direction = rust_motion_direction(m.direction);
-      action.target.wordStyle = rust_word_style(m.wordStyle);
-    } else if (m instanceof RustGlideModal.MotionIntent.ParagraphBegin) {
-      action.target.direction = rust_motion_direction(m.direction);
-    }
-
-    return action;
-  } else if (target instanceof RustGlideModal.EditTargetIntent.LineRange) {
-    return {
-      operation,
-      target: {
-        kind: "line-range",
-        count: target.count,
-        includeLineBreak: target.includeLineBreak,
-      },
-    };
-  } else if (target instanceof RustGlideModal.EditTargetIntent.Range) {
-    const range_kind = range_kind_from_intent(target.range);
-    if (range_kind === undefined) {
-      return undefined;
-    }
-
-    const action: GlideEditingAction = {
-      operation,
-      target: {
-        kind: "range",
-        range: range_kind,
-        count: target.count,
-        inclusive: target.inclusive,
-      },
-    };
-
-    const r = target.range;
-    if (r instanceof RustGlideModal.RangeTargetIntent.Word) {
-      action.target.wordStyle = rust_word_style(r.wordStyle);
-    } else if (r instanceof RustGlideModal.RangeTargetIntent.Bracketed) {
-      action.target.left = r.left;
-      action.target.right = r.right;
-    } else if (r instanceof RustGlideModal.RangeTargetIntent.Quote) {
-      action.target.quote = r.quote;
-    }
-
-    return action;
-  }
-
-  // `CurrentPosition` / `CurrentSelection` / `RawDescription` — Stage A skips
-  // these; the legacy per-key path handles them where applicable.
-  return undefined;
-}
 
 function parse_mode_change(excmd: string): ParsedModeChange | null {
   const match = /^mode_change\s+(\S+)(.*)$/.exec(excmd.trim());
@@ -366,22 +208,24 @@ export class GlideModalEngine {
    */
   #registry: Map<string, RegistryEntry> = new Map();
 
-  /** Keys accumulated for the current in-progress sequence (browser-facing). */
-  #sequence: string[] = [];
+  /**
+   * Names of custom modes registered via `glide.modes.register`.  The caret
+   * style and key-resolution authority now live in the Rust engine; this Set
+   * only tracks which mode names have been registered so we can guard against
+   * duplicate registration and enumerate modes in `mode_names`.
+   */
+  #custom_mode_names: Set<GlideMode> = new Set();
+
+  /** Monotonically-increasing counter for allocating JS-closure callback IDs. */
+  #next_callback_id: number = 0;
 
   /**
-   * Custom modes registered via `glide.modes.register`. The Rust engine has a
-   * fixed `GlideMode` enum and can't represent these, so they're owned here:
-   * tracked for listing/caret styling and resolved JS-side (see
-   * {@link GlideModalEngine.handle_key_event}).
+   * Maps callback IDs (allocated in {@link GlideModalEngine.set}) to the
+   * original `glide.ExcmdValue` closures. When Rust matches a sequence whose
+   * command is `EngineCommand::Callback`, it returns the id in
+   * `Instruction::Callback.callbackId` and `process_key` looks it up here.
    */
-  #custom_modes: Map<GlideMode, { caret: "block" | "underline" | "line" }> = new Map();
-
-  /**
-   * When a custom mode is active, the authoritative current mode (the Rust
-   * engine only knows built-in modes). `null` when a built-in mode is active.
-   */
-  #js_mode: GlideMode | null = null;
+  #callback_map: Map<number, glide.ExcmdValue> = new Map();
 
   #log: ConsoleInstance = console.createInstance
     ? console.createInstance({ prefix: "Glide[Modal]", maxLogLevelPref: "glide.logging.loglevel" })
@@ -395,21 +239,23 @@ export class GlideModalEngine {
   // ----- sequence / mode state -------------------------------------------
 
   get current_sequence(): string[] {
-    return this.#sequence;
+    return this.#bridge.currentSequence();
   }
 
   get has_partial_mapping(): boolean {
-    return this.#sequence.length !== 0;
+    return this.#bridge.currentSequence().length !== 0;
   }
 
   reset_sequence() {
-    this.#sequence = [];
     this.#bridge.resetSequence();
   }
 
   clear_buffer() {
     for (const [key, entry] of [...this.#registry]) {
       if (entry.buffer) {
+        if (entry.callback_id !== undefined) {
+          this.#callback_map.delete(entry.callback_id);
+        }
         this.#registry.delete(key);
       }
     }
@@ -417,13 +263,13 @@ export class GlideModalEngine {
   }
 
   get mode_names(): GlideMode[] {
-    return [...BUILTIN_GLIDE_MODES, ...this.#custom_modes.keys()];
+    return [...BUILTIN_GLIDE_MODES, ...this.#custom_mode_names];
   }
 
   get current_mode(): GlideMode {
-    // A custom mode (if active) is authoritative — the Rust engine only tracks
-    // built-in modes.
-    return this.#js_mode ?? (this.#bridge.currentModeName() as GlideMode);
+    // Rust is the single authority: custom mode name (if any) takes precedence,
+    // otherwise the built-in mode name comes from the Rust engine.
+    return (this.#bridge.currentCustomMode() ?? this.#bridge.currentModeName()) as GlideMode;
   }
 
   /**
@@ -431,12 +277,15 @@ export class GlideModalEngine {
    * a mode can only be registered once (built-in or custom).
    */
   register_mode(mode: GlideMode, opts: { caret: "block" | "underline" | "line" }) {
-    if (is_builtin_mode(mode) || this.#custom_modes.has(mode)) {
+    if (is_builtin_mode(mode) || this.#custom_mode_names.has(mode)) {
       throw new Error(
         `The \`${mode}\` mode has already been registered. Modes can only be registered once`,
       );
     }
-    this.#custom_modes.set(mode, { caret: opts.caret });
+    this.#custom_mode_names.add(mode);
+    // Register with Rust so it can resolve keys in this mode and report the
+    // caret style via `customModeCaretStyle`.
+    this.#bridge.registerCustomMode(mode, CARET_STYLE_TO_ENUM[opts.caret]);
   }
 
   /**
@@ -444,23 +293,22 @@ export class GlideModalEngine {
    * pipeline (command bar, hints, sandbox `glide.ctx.mode = …`, custom modes).
    */
   set_mode(mode: GlideMode) {
-    this.#sequence = [];
-    if (this.#custom_modes.has(mode)) {
-      // Rust can't represent a custom mode; track it JS-side and park the Rust
-      // engine in normal so it stops matching built-in mappings until we return.
-      this.#js_mode = mode;
-      this.#bridge.setMode(rust_mode("normal"));
+    this.#bridge.resetSequence();
+    if (this.#custom_mode_names.has(mode)) {
+      // Delegate to Rust: it parks itself in Normal internally and records the
+      // custom mode name so `resolveKeyNotation` routes keys correctly.
+      this.#bridge.setCustomMode(mode);
       return;
     }
 
-    this.#js_mode = null;
     this.#bridge.setMode(rust_mode(mode));
   }
 
   mode_to_style_enum(mode: GlideMode): number {
-    const custom = this.#custom_modes.get(mode);
-    if (custom) {
-      return CARET_STYLE_TO_ENUM[custom.caret];
+    if (!is_builtin_mode(mode)) {
+      // Rust owns the caret style for custom modes; fall back to `block` (0)
+      // if the mode was somehow never registered.
+      return this.#bridge.customModeCaretStyle(mode) ?? 0;
     }
     return this.#bridge.modeCaretStyle(rust_mode(mode));
   }
@@ -478,6 +326,21 @@ export class GlideModalEngine {
     const retain_key_display = opts?.retain_key_display ?? false;
 
     for (const mode of typeof modes === "string" ? [modes] : modes) {
+      // Allocate an opaque callback ID for any non-string rhs (both built-in
+      // and custom modes), so Rust can identify which closure to dispatch via
+      // `ResolvedKeyResult.matchedCallbackId` without a separate registry scan.
+      let callback_id: number | undefined;
+      if (typeof rhs !== "string") {
+        // If a mapping already exists with a callback ID, clean up the old entry
+        // to avoid leaking closures in #callback_map.
+        const existing = this.#registry.get(registry_key(mode, sequence));
+        if (existing?.callback_id !== undefined) {
+          this.#callback_map.delete(existing.callback_id);
+        }
+        callback_id = this.#next_callback_id++;
+        this.#callback_map.set(callback_id, rhs);
+      }
+
       this.#registry.set(registry_key(mode, sequence), {
         mode,
         sequence,
@@ -487,11 +350,25 @@ export class GlideModalEngine {
         retain_key_display,
         buffer,
         deleted: false,
+        callback_id,
       });
 
-      // Custom modes live only in the JS registry (Rust can't represent them);
-      // they're resolved by `handle_key_event` directly.
-      if (this.#custom_modes.has(mode)) {
+      if (this.#custom_mode_names.has(mode)) {
+        // Custom-mode keymaps are now resolved by the Rust engine (via
+        // `setCustomKeymap` / `resolveKeyNotation`).  The `mode` field in
+        // `KeymapDefinition` is a sentinel (Normal); the actual mode name is
+        // carried in `customMode`.
+        this.#bridge.setCustomKeymap(
+          new RustGlideModal.KeymapDefinition({
+            mode: RustGlideModal.GlideMode.Normal, // sentinel, ignored by Rust
+            sequence,
+            command: this.#to_engine_command(rhs, callback_id),
+            retainKeyDisplay: retain_key_display,
+            buffer,
+            description: opts?.description ?? null,
+            customMode: mode,
+          }),
+        );
         continue;
       }
 
@@ -499,7 +376,7 @@ export class GlideModalEngine {
         new RustGlideModal.KeymapDefinition({
           mode: rust_mode(mode),
           sequence,
-          command: this.#to_engine_command(mode, sequence, rhs),
+          command: this.#to_engine_command(rhs, callback_id),
           retainKeyDisplay: retain_key_display,
           buffer,
           description: opts?.description ?? null,
@@ -517,8 +394,13 @@ export class GlideModalEngine {
     const buffer = opts?.buffer ?? false;
 
     for (const mode of typeof modes === "string" ? [modes] : modes) {
+      const entry = this.#registry.get(registry_key(mode, sequence));
+      if (entry?.callback_id !== undefined) {
+        this.#callback_map.delete(entry.callback_id);
+      }
       this.#registry.delete(registry_key(mode, sequence));
-      if (this.#custom_modes.has(mode)) {
+      if (this.#custom_mode_names.has(mode)) {
+        this.#bridge.delCustomKeymap(mode, sequence);
         continue;
       }
       this.#bridge.delKeymap(rust_mode(mode), sequence, buffer);
@@ -553,98 +435,140 @@ export class GlideModalEngine {
 
   // ----- key resolution --------------------------------------------------
 
-  handle_key_event(
-    event: KeyboardEvent,
-    _current_mode: GlideMode,
-  ): ResolvedMappingNode | undefined {
-    const keyn = Keys.event_to_key_notation(event);
-    const mode_before = this.current_mode;
-    this.#sequence.push(keyn);
+  /** Process a raw key event through the Rust engine and return a fully-resolved
+   *  {@link ProcessedKeyDisposition}. Returns `null` for modifier-only / dead keys. */
+  process_key(event: KeyboardEvent): ProcessedKeyDisposition | null {
+    const disp = this.#bridge.processKey({
+      key: event.key,
+      code: event.code,
+      ctrl: event.ctrlKey,
+      alt: event.altKey,
+      shift: event.shiftKey,
+      meta: event.metaKey,
+    });
+    if (!disp) return null;
 
-    // Custom modes have no Rust representation, so resolve them against the JS
-    // registry directly.
-    if (this.#custom_modes.has(mode_before)) {
-      return this.#resolve_in_custom_mode(mode_before);
-    }
-
-    const result = this.#bridge.resolveKeyNotation(keyn);
-
-    if (result.hasPartialMatch) {
-      this.#log.debug(`${keyn} -> partial mapping`);
-      return { has_children: true, value: null };
-    }
-
-    if (!result.matchedMapping) {
-      this.#log.debug(`${keyn} -> did not match`);
-      return undefined;
-    }
-
-    const matched_sequence = [...this.#sequence];
-    const entry = this.#registry.get(registry_key(mode_before, matched_sequence));
-
-    const command = entry?.rhs ?? this.#synthesize_command(result);
-    if (command == null) {
-      // e.g. plain typing in insert mode — let the browser handle the key.
-      this.#log.debug(`${keyn} -> matched with no executable command (pass-through)`);
-      return undefined;
-    }
-
-    // Extract a typed editing-action descriptor (if any) from the Rust
-    // `ExecuteEditingAction` intent. The content process uses it to apply
-    // counts and operator×motion composition; when absent the legacy per-key
-    // path runs unchanged.
-    const editing_action = this.#editing_action_from_result(result);
+    const enters_insert = disp.modeTransition?.nextMode === RustGlideModal.GlideMode.Insert;
+    const instructions = disp.matchedMapping
+      ? this.#translate_instructions(disp, enters_insert)
+      : [];
 
     return {
-      has_children: false,
-      value: {
-        sequence: matched_sequence,
-        command,
-        retain_key_display: entry?.retain_key_display ?? this.#synthesize_retain(result),
-        deleted: false,
-        description: entry?.description,
-        editing_action,
-      },
+      preventDefault: disp.preventDefault,
+      sequenceDisplay: disp.sequenceDisplay,
+      modeTransition: disp.modeTransition ? this.#rust_mode_name(disp.modeTransition.nextMode) : null,
+      matchedMapping: disp.matchedMapping,
+      hasPartialMatch: disp.hasPartialMatch,
+      instructions,
     };
   }
 
-  /**
-   * Resolve a key in a custom (JS-registered) mode using a small prefix matcher
-   * over the registry, mirroring the Rust engine's managed-mode resolver.
-   */
-  #resolve_in_custom_mode(mode: GlideMode): ResolvedMappingNode | undefined {
-    const pending = this.#sequence;
+  #translate_instructions(
+    disp: RustGlideModalT.KeyDisposition,
+    enters_insert: boolean,
+  ): ProcessedInstruction[] {
+    const out: ProcessedInstruction[] = [];
 
-    const entry = this.#registry.get(registry_key(mode, pending));
-    if (entry && !entry.deleted) {
-      const matched_sequence = [...pending];
-      this.#sequence = [];
-      return {
-        has_children: false,
-        value: {
-          sequence: matched_sequence,
-          command: entry.rhs,
-          retain_key_display: entry.retain_key_display,
-          deleted: false,
-          description: entry.description,
-        },
+    // Pure vim mode change (i/v/<Esc>) — no browser command intents, just a transition.
+    if (disp.instructions.length === 0 && disp.modeTransition) {
+      out.push({ kind: "mode-change" });
+      return out;
+    }
+
+    for (const instr of disp.instructions) {
+      if (instr instanceof RustGlideModal.Instruction.Callback) {
+        const cb = this.#callback_map.get(Number(instr.callbackId));
+        if (cb != null) out.push({ kind: "callback", cb, sequence: instr.sequence });
+      } else if (instr instanceof RustGlideModal.Instruction.EditingAction) {
+        const w = instr.action;
+        const op = w.operation === "delete" && enters_insert ? "change" : w.operation;
+        out.push({
+          kind: "excmd",
+          command: "motion",
+          editing_action: {
+            operation: op as GlideEditingAction["operation"],
+            character: w.character ?? undefined,
+            target: w.target as GlideEditingAction["target"],
+          },
+        });
+      } else if (instr instanceof RustGlideModal.Instruction.InsertSequence) {
+        out.push({
+          kind: "excmd",
+          command: "motion",
+          editing_action: {
+            operation: "insert",
+            ops: this.#translate_insert_ops(instr.ops),
+            entersInsert: instr.entersInsert,
+            target: { kind: "current-position", count: 0 },
+          },
+        });
+      } else if (instr instanceof RustGlideModal.Instruction.OpenCommandBar) {
+        out.push({ kind: "excmd", command: "commandline_show" });
+      } else if (instr instanceof RustGlideModal.Instruction.Excmd) {
+        const cmd = instr.arguments.length
+          ? `${instr.command} ${instr.arguments.join(" ")}`
+          : instr.command;
+        out.push({ kind: "excmd", command: cmd });
+      }
+    }
+    return out;
+  }
+
+  #translate_insert_ops(ops: RustGlideModalT.InsertOp[]): GlideInsertOp[] {
+    return ops.map(op => {
+      if (op instanceof RustGlideModal.InsertOp.OpenLine) return { kind: "open_line" as const, above: op.above };
+      if (op instanceof RustGlideModal.InsertOp.AutoMove) return {
+        kind: "automove" as const,
+        direction: op.direction === RustGlideModal.AutomaticMoveDirection.EndOfLine ? "endline" : "left" as const,
       };
-    }
+      if (op instanceof RustGlideModal.InsertOp.InsertText) return { kind: "insert_text" as const, text: op.text };
+      if (op instanceof RustGlideModal.InsertOp.MoveToColumn) return {
+        kind: "move" as const,
+        target: op.action.target as GlideEditingAction["target"],
+      };
+      return { kind: "open_line" as const, above: false };
+    });
+  }
 
-    const has_partial = [...this.#registry.values()].some(candidate =>
-      !candidate.deleted
-      && candidate.mode === mode
-      && candidate.sequence.length > pending.length
-      && pending.every((key, index) => candidate.sequence[index] === key)
-    );
-    if (has_partial) {
-      this.#log.debug(`${pending.join("")} -> partial mapping (custom mode)`);
-      return { has_children: true, value: null };
-    }
+  // ----- Phase 6: excmd registry & dot-repeat ----------------------------
 
-    this.#log.debug(`${pending.join("")} -> did not match (custom mode)`);
-    this.#sequence = [];
-    return undefined;
+  /**
+   * Return the full built-in excmd registry from Rust.
+   *
+   * Each entry has `name`, `description`, `contentFlag`, and `repeatable`.
+   * Useful for which-key display and command-line completion.
+   */
+  excmd_registry(): RustGlideModalT.ExcmdInfo[] {
+    return this.#bridge.excmdRegistry();
+  }
+
+  /**
+   * Parse `input` (e.g. `"tab_next"` or `"mode_change normal"`) into a
+   * `ParsedExcmd` containing the command name and positional arguments.
+   *
+   * Throws when the command name is not in the built-in registry.
+   * User-defined excmds are not validated here.
+   */
+  parse_excmd(input: string): RustGlideModalT.ParsedExcmd {
+    return this.#bridge.parseExcmd(input);
+  }
+
+  /**
+   * Notify Rust that a repeatable excmd was dispatched so it can be returned
+   * by {@link repeat_last} for the next dot-repeat invocation.
+   *
+   * Non-repeatable commands are silently ignored.
+   */
+  note_executed(parsed: RustGlideModalT.ParsedExcmd): void {
+    this.#bridge.noteExecuted(parsed);
+  }
+
+  /**
+   * Return the last repeatable excmd recorded by {@link note_executed}, or
+   * `null` when no repeatable excmd has been dispatched yet.
+   */
+  repeat_last(): RustGlideModalT.ParsedExcmd | null {
+    return this.#bridge.repeatLast();
   }
 
   // ----- internals -------------------------------------------------------
@@ -659,9 +583,8 @@ export class GlideModalEngine {
   }
 
   #to_engine_command(
-    _mode: GlideMode,
-    sequence: string[],
     rhs: glide.ExcmdValue,
+    callback_id?: number,
   ): RustGlideModalT.EngineCommand {
     if (typeof rhs === "string") {
       // `.` (`repeat`) is dispatched like any other excmd; the actual replay is
@@ -684,96 +607,16 @@ export class GlideModalEngine {
       return new RustGlideModal.EngineCommand.DispatchBrowserCommand({
         commandName: rhs,
         arguments: [],
-        isRepeatable: true,
       });
     }
 
     // Non-string excmd values (JS callbacks / structured excmds) can't be held
-    // by Rust, so the registry is the source of truth for execution. We still
-    // register the sequence so Rust can match it; a synthetic token is used as
-    // the command name (it is never executed via this path — `handle_key_event`
-    // resolves the real value from the registry).
-    return new RustGlideModal.EngineCommand.DispatchBrowserCommand({
-      commandName: `__glide_callback:${sequence.join("")}`,
-      arguments: [],
-      isRepeatable: true,
+    // by Rust, so the callback_id allocated in `set()` is stored with the
+    // mapping. Rust returns it in `Instruction::Callback.callbackId` after a
+    // match, and `process_key` looks it up in `#callback_map`.
+    return new RustGlideModal.EngineCommand.Callback({
+      callbackId: BigInt(callback_id!),
     });
-  }
-
-  /**
-   * Build a `glide.ExcmdValue` for a mapping that matched a built-in Rust
-   * default (i.e. one not present in the TS registry).
-   */
-  #synthesize_command(result: RustGlideModalT.ResolvedKeyResult): glide.ExcmdValue | null {
-    // Any typed editing action — a bare motion (`w`), an operator+motion
-    // (`dw`, `d$`), a text object (`diw`), or a line edit (`dd`) — is applied
-    // content-side through the `motion` excmd. The descriptor carries the
-    // operation (move/delete/yank) and the content actor reads it to apply the
-    // edit and perform the resulting mode change (`change` → insert), so we
-    // route everything here rather than dropping the intent into a bare
-    // `mode_change` for the op-pending → normal/insert transition.
-    const has_editing_action = result.browserCommandIntents.some(
-      intent => intent instanceof RustGlideModal.BrowserCommandIntent.ExecuteEditingAction,
-    );
-
-    if (has_editing_action) {
-      return "motion" as glide.ExcmdString;
-    }
-
-    if (result.modeTransition) {
-      const target = result.modeTransition.nextMode;
-      const parts = [`mode_change ${this.#rust_mode_name(target)}`];
-
-      for (const intent of result.browserCommandIntents) {
-        if (intent instanceof RustGlideModal.BrowserCommandIntent.ApplyAutomaticMove) {
-          parts.push(
-            intent.automaticMoveDirection === RustGlideModal.AutomaticMoveDirection.EndOfLine
-              ? "--automove=endline"
-              : "--automove=left",
-          );
-        }
-      }
-
-      return parts.join(" ") as glide.ExcmdString;
-    }
-
-    for (const intent of result.browserCommandIntents) {
-      if (intent instanceof RustGlideModal.BrowserCommandIntent.ExecuteBrowserCommand) {
-        return (intent.arguments.length
-          ? `${intent.commandName} ${intent.arguments.join(" ")}`
-          : intent.commandName) as glide.ExcmdString;
-      }
-      if (intent instanceof RustGlideModal.BrowserCommandIntent.OpenCommandBar) {
-        return "commandline_show";
-      }
-      // `InsertText` intents are handled content-side (plain insert-mode
-      // typing) and have no parent excmd.
-    }
-
-    return null;
-  }
-
-  #synthesize_retain(result: RustGlideModalT.ResolvedKeyResult): boolean {
-    return result.modeTransition?.nextMode === RustGlideModal.GlideMode.OperatorPending;
-  }
-
-  /**
-   * Extract the first `ExecuteEditingAction` intent from a resolved key result
-   * and convert it to a plain `GlideEditingAction`. Returns `undefined` when
-   * there's no typed descriptor or it isn't handled by the executor.
-   */
-  #editing_action_from_result(result: RustGlideModalT.ResolvedKeyResult): GlideEditingAction | undefined {
-    // `c` (change) arrives from modalkit as a `Delete` operation plus a
-    // transition into insert mode; recover the "change" intent from that
-    // transition so the content executor drops into insert after deleting.
-    const enters_insert = result.modeTransition?.nextMode === RustGlideModal.GlideMode.Insert;
-
-    for (const intent of result.browserCommandIntents) {
-      if (intent instanceof RustGlideModal.BrowserCommandIntent.ExecuteEditingAction) {
-        return editing_action_from_intent(intent.editingAction, enters_insert);
-      }
-    }
-    return undefined;
   }
 
   #rust_mode_name(mode: RustGlideModalT.GlideMode): GlideMode {
@@ -836,7 +679,8 @@ export class GlideModalEngine {
     this.set("normal", "<A-p>", "tab_pin_toggle");
     this.set("normal", "yt", "tab_duplicate");
 
-    this.set("normal", ".", "repeat");
+    // `.` is left to modalkit's native dot-repeat (edits only). Repeating the
+    // last non-edit excmd is a separate, explicitly-bound `repeat_command`.
     this.set("insert", "jj", "mode_change normal");
     this.set(["insert", "visual", "op-pending"], "<Esc>", "mode_change normal");
     this.set(["insert", "visual", "op-pending"], "<C-[>", "mode_change normal");
@@ -854,14 +698,12 @@ export class GlideModalEngine {
     // `editing-actions.mts` applies. `c` arrives as a `Delete` plus an
     // insert-mode transition; `dd`/`cc` arrive as `Range(Line)`.
 
-    // `x`/`X` (delete char) and `s` (substitute char) are native modalkit edits
-    // (`Delete`/change + `Column` motion) handled by the descriptor path, same
-    // as `dl`/`dh`. The remaining custom Glide commands with no modalkit
-    // equivalent stay JS-registered: `o` (open line), `I` (insert at first
-    // non-blank), `r` (replace), and the JS visual-mode shims.
-    this.set("normal", "o", "motion o");
+    // `x`/`X` (delete char), `s` (substitute char), `r` (replace char), and
+    // `o`/`O` (open line + insert) are native modalkit edits handled by the
+    // descriptor path (`r` via `CharReplaceSuffix`; `o`/`O` via the `insert` op
+    // sequence, so `.o` re-types the text). `i`/`a`/`A`/`I` insert-entries stay
+    // JS-registered (their block-cursor automove semantics still need porting).
     this.set(["normal", "visual"], "I", "motion I");
-    this.set("normal", "r", "r");
     this.set("normal", "h", "caret_move left");
     this.set("normal", "l", "caret_move right");
     this.set("normal", "j", "caret_move down");

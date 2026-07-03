@@ -37,6 +37,18 @@ export function apply_editing_action(
   action: GlideEditingAction,
   ctx: { mode: GlideMode },
 ): boolean {
+  // `r{char}` replaces the `count` characters at the cursor in place, rather
+  // than selecting a range and running an operation on it.
+  if (action.operation === "replace") {
+    return apply_replace(editor, action);
+  }
+
+  // Insert-entry (`o`/`O`/…) and `.`-replayed insert sessions: an ordered list
+  // of primitive steps (open line / move / caret adjust / type text).
+  if (action.operation === "insert") {
+    return apply_insert(editor, action);
+  }
+
   let handled = false;
 
   if (action.target.kind === "motion") {
@@ -86,6 +98,89 @@ function apply_operation(editor: nsIEditor, action: GlideEditingAction): boolean
     }
     default:
       return false;
+  }
+}
+
+/**
+ * Replace the `count` characters at the cursor with `action.character` in place
+ * (`r{char}` / `3r{char}`). Ports the legacy `Glide::ReplaceChar` logic (which
+ * handled a single char) and repeats it for counts.
+ */
+function apply_replace(editor: nsIEditor, action: GlideEditingAction): boolean {
+  const character = action.character;
+  if (character === undefined) {
+    return false;
+  }
+  const count = Math.max(1, action.target.count);
+
+  for (let i = 0; i < count; i++) {
+    motions.back_char(editor, /* extend */ false);
+    editor.deleteSelection(/* action */ editor.eNext!, /* stripWrappers */ editor.eStrip!);
+    editor.insertText(character);
+    // Advance onto the next character to replace (the last replace leaves the
+    // caret on the replaced char, matching vim).
+    if (i < count - 1) {
+      motions.forward_char(editor, /* extend */ false);
+    }
+  }
+  return true;
+}
+
+/**
+ * Apply an insert-entry / dot-replayed insert session: an ordered list of
+ * primitive steps. Positioning steps (`open_line` / `move`) run first, then the
+ * insert-entry caret adjustment (`automove` — skipped for open-line entries,
+ * which position the caret themselves), then any typed text (from a `.` replay).
+ */
+function apply_insert(editor: nsIEditor, action: GlideEditingAction): boolean {
+  const ops = action.ops;
+  if (ops === undefined) {
+    return false;
+  }
+
+  const has_open_line = ops.some(op => op.kind === "open_line");
+
+  for (const op of ops) {
+    if (op.kind === "open_line") {
+      apply_open_line(editor, op.above);
+    } else if (op.kind === "move" && op.target.motion !== undefined) {
+      step_motion(editor, op.target.motion, op.target.direction ?? "next", op.target.wordStyle === "big", /* extend */ false);
+    }
+  }
+
+  if (!has_open_line) {
+    for (const op of ops) {
+      if (op.kind === "automove") {
+        if (op.direction === "endline") {
+          motions.end_of_line(editor, /* extend */ false);
+        } else {
+          motions.back_char(editor, /* extend */ false);
+        }
+      }
+    }
+  }
+
+  for (const op of ops) {
+    if (op.kind === "insert_text") {
+      editor.insertText(op.text);
+    }
+  }
+
+  return true;
+}
+
+/**
+ * Open a new line below (`o`) or above (`O`) the current line and leave the
+ * caret on it. Mirrors the legacy `o` handler (end-of-line + line break).
+ */
+function apply_open_line(editor: nsIEditor, above: boolean): void {
+  if (above) {
+    editor.selectionController.intraLineMove(/* forward */ false, /* extend */ false);
+    editor.insertLineBreak();
+    editor.selectionController.lineMove(/* forward */ false, /* extend */ false);
+  } else {
+    editor.selectionController.intraLineMove(/* forward */ true, /* extend */ false);
+    editor.insertLineBreak();
   }
 }
 

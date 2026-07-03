@@ -459,26 +459,22 @@ function synthesizeAndWaitNativeMouseMove(aTarget: any, aOffsetX: any, aOffsetY:
  * @param {number} [aEvent.repeat]
  *        If you emulate auto-repeat, you should set the count of repeat.
  *        This method will automatically synthesize keydown (and keypress).
- * @param {boolean} [aEvent.ctrlKey]
- *        Customise the `ctrlKey` modifier.
- * @param {boolean} [aEvent.shiftKey]
- *        Customise the `shiftKey` modifier.
- * @param {*} [aEvent.location]
+ * @param {*} aEvent.location
  *        If you want to specify this, you can specify this explicitly.
  *        However, if you don't specify this value, it will be computed
  *        from code value.
- * @param {string} [aEvent.type]
+ * @param {string} aEvent.type
  *        Basically, you shouldn't specify this.  Then, this function will
  *        synthesize keydown (, keypress) and keyup.
  *        If keydown is specified, this only fires keydown (and keypress if
  *        it should be fired).
  *        If keyup is specified, this only fires keyup.
- * @param {number} [aEvent.keyCode]
+ * @param {number} aEvent.keyCode
  *        Must be 0 - 255 (0xFF). If this is specified explicitly,
  *        .keyCode value is initialized with this value.
  * @param {DOMWindow} [aWindow=window]
  *        DOM window used to dispatch the event.
- * @param {Function} [aCallback]
+ * @param {Function} aCallback
  *        Is optional and can be used to receive notifications from TIP.
  *
  * @description
@@ -495,12 +491,10 @@ function synthesizeAndWaitNativeMouseMove(aTarget: any, aOffsetX: any, aOffsetY:
 function synthesizeKey(aKey: string, aEvent?: {
     code?: string;
     repeat?: number;
-    ctrlKey?: boolean;
-    shiftKey?: boolean;
-    location?: any;
-    type?: string;
-    keyCode?: number;
-}, aWindow?: DOMWindow, aCallback?: Function): void;
+    location: any;
+    type: string;
+    keyCode: number;
+}, aWindow?: DOMWindow, aCallback: Function): void;
 /**
  * This is a wrapper around synthesizeKey that waits for the key event to be
  * dispatched to the target content. It returns a promise which is resolved
@@ -966,7 +960,7 @@ function _computeSrcElementFromSrcSelection(aSrcSelection: any): any;
  *                The final x coordinate inside srcElement
  * @param {number} aParams.finalY
  *                The final x coordinate inside srcElement
- * @param {any} aParams.id
+ * @param {Any} aParams.id
  *                The pointer event id
  * @param {DOMWindow} aParams.srcWindow
  *                The DOM window for dispatching event on srcElement, defaults to the current window object.
@@ -991,7 +985,7 @@ function synthesizePlainDragAndDrop(aParams: {
     stepY: number;
     finalX: number;
     finalY: number;
-    id: any;
+    id: Any;
     srcWindow: DOMWindow;
     destWindow: DOMWindow;
     expectCancelDragStart: boolean;

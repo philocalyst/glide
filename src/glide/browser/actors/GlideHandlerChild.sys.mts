@@ -3,7 +3,6 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
-import type { GlideExcmdsMap, ParsedArg } from "../base/content/browser-excmds-registry.mts";
 import type { State } from "../base/content/browser.mjs";
 import type { Sandbox } from "../base/content/sandbox.mts";
 import type { ToDeserialisedIPCFunction } from "../base/content/utils/ipc.mts";
@@ -29,7 +28,6 @@ export interface ChildMessages {
   };
   "Glide::HideHints": {};
   "Glide::ChangeMode": { mode: GlideMode; force?: boolean };
-  "Glide::RecordRepeatableCommand": ParentMessages["Glide::ExecuteContentCommand"];
 }
 
 export interface ChildQueries {}
@@ -140,13 +138,6 @@ export class GlideHandlerChild extends JSWindowActorChild<
       }
       case "Glide::ExecuteContentCommand": {
         this.#handle_excmd(message.data);
-        break;
-      }
-      case "Glide::ReplaceChar": {
-        const editor = this.#expect_editor("replace char");
-        motions.back_char(editor, false);
-        editor.deleteSelection(/* action */ editor.eNext!, /* stripWrappers */ editor.eStrip!);
-        editor.insertText(message.data.character);
         break;
       }
       case "Glide::KeyMappingPartial": {
@@ -484,20 +475,25 @@ export class GlideHandlerChild extends JSWindowActorChild<
             mode: this.state?.mode ?? "normal",
           });
           if (handled) {
+            // Descriptor edits are dot-repeatable via modalkit's native `.`
+            // (Rust replays the edit sequence), so they are NOT recorded in the
+            // JS `#last_command` history here — that history now backs only the
+            // non-edit `repeat_command`. We just settle into the resulting mode.
             switch (props.editing_action.operation) {
-              // An edit (delete/change/yank) ends the operator and is
-              // dot-repeatable; `change` additionally enters insert mode.
               case "change":
-                this.#record_repeatable_command(props);
                 this.#change_mode("insert");
+                break;
+              case "insert":
+                // Insert-entry (`o`/`O`/…) ends in insert; a `.` replay of an
+                // insert session applies the typed text and ends in normal.
+                this.#change_mode(props.editing_action.entersInsert ? "insert" : "normal");
                 break;
               case "delete":
               case "yank":
-                this.#record_repeatable_command(props);
+              case "replace":
                 this.#change_mode("normal");
                 break;
-              // A bare motion just moves the caret — no mode change, and `.`
-              // does not repeat motions.
+              // A bare motion just moves the caret — no mode change.
             }
             break;
           }
@@ -510,10 +506,6 @@ export class GlideHandlerChild extends JSWindowActorChild<
           throw new Error(
             "`motion` excmd requires either a `keyseq` or a typed `editing_action` descriptor",
           );
-        }
-
-        if (this.#motion_is_repeatable(keyseq)) {
-          this.#record_repeatable_command(props);
         }
 
         // Legacy per-key arms for custom Glide commands that have no modalkit
@@ -558,13 +550,6 @@ export class GlideHandlerChild extends JSWindowActorChild<
             this.#change_mode("insert");
             break;
           }
-          case "o": {
-            editor.selectionController.intraLineMove(/* forward */ true, /* extend */ false);
-            editor.insertLineBreak();
-
-            this.#change_mode("insert");
-            break;
-          }
           default:
             throw assert_never(keyseq, `Unhandled motion keyseq: ${keyseq}`);
         }
@@ -597,32 +582,6 @@ export class GlideHandlerChild extends JSWindowActorChild<
       }
       default:
         throw assert_never(props.command);
-    }
-  }
-
-  /**
-   * Whether or not `.` should be updated to repeat this legacy per-key motion.
-   *
-   * Only the custom Glide edit `o` (open line) goes through here; descriptor-
-   * driven edits (`dw`, `cw`, `x`, `s`, …) are recorded as repeatable directly
-   * in the `motion` case based on their operation.
-   */
-  #motion_is_repeatable(
-    keyseq: ParsedArg<GlideExcmdsMap["motion"]["args_schema"]["keyseq"]>,
-  ): boolean {
-    switch (keyseq) {
-      case null:
-      case "v":
-      case "vh":
-      case "vl":
-      case "vd":
-      case "vc":
-      case "I":
-        return false;
-      case "o":
-        return true;
-      default:
-        throw assert_never(keyseq, `Unhandled motion keyseq: ${keyseq}`);
     }
   }
 
@@ -739,12 +698,6 @@ export class GlideHandlerChild extends JSWindowActorChild<
     this.state.mode = mode;
     this.send_async_message("Glide::ChangeMode", { mode, force });
     this._log.debug("new mode", this.state?.mode ?? "unset");
-  }
-
-  #record_repeatable_command(
-    props: ChildMessages["Glide::RecordRepeatableCommand"],
-  ): void {
-    this.send_async_message("Glide::RecordRepeatableCommand", props);
   }
 
   handleEvent(event: Event) {

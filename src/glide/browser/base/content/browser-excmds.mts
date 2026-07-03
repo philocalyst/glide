@@ -13,10 +13,9 @@ import type {
   GlideExcmdName,
 } from "./browser-excmds-registry.mts";
 import type { ParseResult } from "./utils/args.mjs";
-import type { ResolvedMappingNode, GlideEditingAction } from "./modal-engine.mts";
+import type { GlideEditingAction } from "./modal-engine.mts";
 
 const MozUtils = ChromeUtils.importESModule("chrome://glide/content/utils/moz.mjs");
-const Keys = ChromeUtils.importESModule("chrome://glide/content/utils/keys.mjs", { global: "current" });
 const { assert_never } = ChromeUtils.importESModule("chrome://glide/content/utils/guards.mjs");
 const { GLIDE_EXCOMMANDS_MAP } = ChromeUtils.importESModule("chrome://glide/content/browser-excmds-registry.mjs");
 const Args = ChromeUtils.importESModule("chrome://glide/content/utils/args.mjs");
@@ -28,8 +27,6 @@ const { tab_id_to_firefox } = ChromeUtils.importESModule("chrome://glide/content
 
 interface ExecuteProps {
   args: glide.ExcmdCallbackProps;
-
-  mapping?: KeyMappingTrieNode | null;
 
   /**
    * Whether or not the executed command should be saved so that it can be repeated with `.`
@@ -49,11 +46,7 @@ type CommandHistoryEntry =
     type: "command";
     command: glide.ExcmdString;
   }
-  | { type: "callback"; cb: glide.ExcmdCallback }
-  | {
-    type: "content-cmd";
-    props: ParentMessages["Glide::ExecuteContentCommand"];
-  };
+  | { type: "callback"; cb: glide.ExcmdCallback };
 
 class GlideExcmdsClass {
   #last_command: CommandHistoryEntry | null = null;
@@ -180,6 +173,16 @@ class GlideExcmdsClass {
         : command_meta.repeatable
     ) {
       this.add_to_command_history({ type: "command", command });
+
+      // Phase 6: also notify Rust so repeat_last() can return this excmd.
+      // Failures are non-fatal — user-defined excmds won't be in Rust's
+      // registry, so we just fall through to the JS #last_command fallback.
+      try {
+        const parsed = GlideBrowser.key_manager.parse_excmd(command);
+        GlideBrowser.key_manager.note_executed(parsed);
+      } catch {
+        // unknown to Rust (e.g. a user excmd) — JS history is the fallback
+      }
     }
 
     // for commands that need access to the content frame, just shortcut early
@@ -188,14 +191,29 @@ class GlideExcmdsClass {
       this.#execute_content_command({
         command: command_meta,
         args: command,
-        sequence: props?.mapping?.value?.sequence ?? [],
+        sequence: [],
         editing_action: props?.editing_action,
       });
       return;
     }
 
     switch (command_meta.name) {
-      case "repeat": {
+      case "repeat_command": {
+        // Phase 6: prefer the Rust registry's repeat_last() for built-in
+        // repeatable excmds; fall back to the JS #last_command for user
+        // callbacks and excmds not yet wired through note_executed.
+        const rust_last = GlideBrowser.key_manager.repeat_last();
+        if (rust_last) {
+          const cmd = rust_last.arguments.length
+            ? `${rust_last.name} ${rust_last.arguments.join(" ")}`
+            : rust_last.name;
+          console.info(`repeating \`${cmd}\` command (via Rust)`);
+          await this.execute(cmd as glide.ExcmdString, { save_to_history: false });
+          break;
+        }
+
+        // JS fallback: covers user-registered callbacks and any path that
+        // hasn't yet called note_executed.
         const last_command = this.#last_command;
         if (!last_command) {
           throw new Error("No command to repeat");
@@ -209,10 +227,6 @@ class GlideExcmdsClass {
           }
           case "callback": {
             await this.execute(last_command.cb);
-            break;
-          }
-          case "content-cmd": {
-            this.#execute_content_command(last_command.props);
             break;
           }
         }
@@ -817,7 +831,7 @@ class GlideExcmdsClass {
         file.initWithPath(PathUtils.join(chrome_dir, "userChrome.css"));
 
         if (!(await IOUtils.exists(file.path))) {
-          file.create(Ci.nsIFile.NORMAL_FILE_TYPE, FileUtils.PERMS_FILE);
+          file.create(Ci.nsIFile.NORMAL_FILE_TYPE!, FileUtils.PERMS_FILE!);
         }
 
         file.launch();
@@ -854,44 +868,6 @@ class GlideExcmdsClass {
         } = this.#parse_command_args(command_meta, command);
         GlideBrowser.api.keymaps.del("insert", lhs);
         break;
-      }
-
-      case "r": {
-        const {
-          args: { character },
-        } = this.#parse_command_args(command_meta, command);
-
-        if (character) {
-          GlideBrowser.get_focused_actor().send_async_message("Glide::ReplaceChar", {
-            character: character === "<CR>"
-              ? "\n"
-              : character === "<Tab>"
-              ? "\t"
-              : character,
-          });
-          if (GlideBrowser.state.mode !== "normal") {
-            await GlideBrowser.api.excmds.execute("mode_change normal");
-          }
-
-          return;
-        }
-
-        await GlideExcmds.execute("mode_change op-pending");
-
-        const event = await GlideBrowser.api.keys.next();
-        if (!Keys.is_printable(event.glide_key)) {
-          return;
-        }
-
-        return await GlideExcmds.execute(
-          `r ${
-            event.glide_key === "<CR>" || event.glide_key === "<Tab>"
-              ? event.glide_key
-              // note: intentionally using `.key` here as we don't care about modifiers
-              : event.key
-          }`,
-          { save_to_history: true },
-        );
       }
 
       case "help": {

@@ -113,8 +113,9 @@ export const GLIDE_EXCOMMANDS = [
   },
 
   {
-    name: "repeat",
-    description: "Repeat the last invoked command. In general only applies to \"mutative\" commands",
+    name: "repeat_command",
+    description:
+      "Re-run the last invoked non-edit excmd (navigation, tabs, custom commands). Editing repeats (`dw`, `x`, `rx`, …) are handled by vim's `.` instead.",
     content: false,
     repeatable: false,
   },
@@ -320,13 +321,6 @@ export const GLIDE_EXCOMMANDS = [
     repeatable: false,
   },
 
-  {
-    name: "r",
-    description: "Replace the current character",
-    content: false,
-    repeatable: false,
-    args_schema: { character: { type: "string", required: false, position: 0 } } as const satisfies ArgumentsSchema,
-  },
 
   { name: "scroll_top", description: "Scroll to the top of the window", content: false, repeatable: false },
   { name: "scroll_bottom", description: "Scroll to the bottom of the window", content: false, repeatable: false },
@@ -425,7 +419,6 @@ export const GLIDE_EXCOMMANDS = [
             "vl",
             "vd",
             "vc",
-            "o",
           ],
         },
         // Optional: when a typed `editing_action` descriptor is attached, the

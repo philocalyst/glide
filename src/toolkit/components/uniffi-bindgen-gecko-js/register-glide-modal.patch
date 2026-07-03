@@ -1,21 +1,46 @@
 diff --git a/toolkit/components/uniffi-bindgen-gecko-js/components/Cargo.toml b/toolkit/components/uniffi-bindgen-gecko-js/components/Cargo.toml
 --- a/toolkit/components/uniffi-bindgen-gecko-js/components/Cargo.toml
 +++ b/toolkit/components/uniffi-bindgen-gecko-js/components/Cargo.toml
-@@
+@@ -28,6 +28,7 @@ error-support = { version = "0.1" }
+ tracing-support = "0.1"
+ logins = { version = "0.1", features = ["keydb"] }
+ init_rust_components = { version = "0.1", features = ["keydb"] }
 +glide_modal = { path = "../../../../glide/rust/glide-modal" }
+
+ [features]
+ # Should we depend on xpcom crates?
 diff --git a/toolkit/components/uniffi-bindgen-gecko-js/components/lib.rs b/toolkit/components/uniffi-bindgen-gecko-js/components/lib.rs
 --- a/toolkit/components/uniffi-bindgen-gecko-js/components/lib.rs
 +++ b/toolkit/components/uniffi-bindgen-gecko-js/components/lib.rs
-@@
-+pub use glide_modal;
+@@ -14,6 +14,7 @@ mod reexport_appservices_uniffi_scaffolding {
+     tracing_support::uniffi_reexport_scaffolding!();
+     logins::uniffi_reexport_scaffolding!();
+     init_rust_components::uniffi_reexport_scaffolding!();
++    glide_modal::uniffi_reexport_scaffolding!();
+ }
+
+ // Define extern "C" versions of these UniFFI functions, so that they can be called from C++
 diff --git a/toolkit/components/uniffi-bindgen-gecko-js/config.toml b/toolkit/components/uniffi-bindgen-gecko-js/config.toml
 --- a/toolkit/components/uniffi-bindgen-gecko-js/config.toml
 +++ b/toolkit/components/uniffi-bindgen-gecko-js/config.toml
-@@
+@@ -9,6 +9,9 @@
+
+ # TODO: Upgrade the TOML crate and switch to array of tables syntax.
+
 +[glide_modal]
 +ffi_module_name = "GlideModal"
++
+ [context_id.async_wrappers]
+ ContextIDComponent = "AsyncWrapped"
+ "ContextIDComponent.new" = "Sync"
 diff --git a/toolkit/components/uniffi-bindgen-gecko-js/components/moz.build b/toolkit/components/uniffi-bindgen-gecko-js/components/moz.build
 --- a/toolkit/components/uniffi-bindgen-gecko-js/components/moz.build
 +++ b/toolkit/components/uniffi-bindgen-gecko-js/components/moz.build
-@@
+@@ -6,6 +6,7 @@ MOZ_SRC_FILES += [
+     "generated/RustContextId.sys.mjs",
+     "generated/RustFilterAdult.sys.mjs",
+     "generated/RustInitRustComponents.sys.mjs",
 +    "generated/RustGlideModal.sys.mjs",
+     "generated/RustLogins.sys.mjs",
+     "generated/RustRelevancy.sys.mjs",
+     "generated/RustRemoteSettings.sys.mjs",

@@ -19,8 +19,6 @@ export const AppConstants: Readonly<{
 
   IS_ESR: boolean;
 
-  GLIDE_FIREFOX_VERSION: string;
-
   ACCESSIBILITY: boolean;
 
   // Official corresponds, roughly, to whether this build is performed

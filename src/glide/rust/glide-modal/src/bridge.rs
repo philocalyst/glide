@@ -1,6 +1,9 @@
 use std::sync::Mutex;
 
-use crate::actions::{GlideMode, KeymapDefinition, ResolvedKeyResult};
+use crate::actions::{
+    ExcmdInfo, ExcmdParseError, GlideMode, KeyDisposition, KeyEventInfo, KeymapDefinition,
+    ParsedExcmd, ResolvedKeyResult,
+};
 use crate::engine::GlideModalEngine;
 
 /// The single authority over Glide's modal state.
@@ -71,5 +74,125 @@ impl GlideModalBridge {
 
     pub fn resolve_key_notation(&self, key_notation: String) -> ResolvedKeyResult {
         self.engine.lock().unwrap().resolve_key_notation(&key_notation)
+    }
+
+    /// Convert a raw DOM keyboard event into Vim-style key notation.
+    ///
+    /// This is the Rust port of `Keys.event_to_key_notation` from
+    /// `utils/keys.mts`.  Returns `None` for modifier-only keypresses
+    /// (`Shift`, `Control`, …) and dead keys that Glide cannot handle.
+    ///
+    /// The JS layer should call this instead of `Keys.event_to_key_notation`
+    /// and skip processing when `None` is returned.
+    pub fn key_notation_from_event(&self, event: KeyEventInfo) -> Option<String> {
+        crate::key::key_notation_from_event(&event)
+    }
+
+    // ----- custom mode API -------------------------------------------------
+
+    /// Register a custom mode so the engine can resolve keys in it.
+    /// `caret_style` must match a `GlideCaretStyle` value (0=block, 1=underline,
+    /// 2=line).
+    pub fn register_custom_mode(&self, mode_name: String, caret_style: u8) {
+        self.engine
+            .lock()
+            .unwrap()
+            .register_custom_mode(mode_name, caret_style);
+    }
+
+    /// Activate a custom mode.  Rust parks itself in `Normal` internally; the
+    /// custom mode name governs key resolution until a built-in mode is set.
+    pub fn set_custom_mode(&self, mode_name: String) {
+        self.engine.lock().unwrap().set_custom_mode(mode_name);
+    }
+
+    /// The currently active custom mode name, or `None` when a built-in mode is
+    /// active.
+    pub fn current_custom_mode(&self) -> Option<String> {
+        self.engine.lock().unwrap().current_custom_mode()
+    }
+
+    /// Caret style for a custom mode (see `GlideCaretStyle`), or `None` if the
+    /// mode has not been registered.
+    pub fn custom_mode_caret_style(&self, mode_name: String) -> Option<u8> {
+        self.engine
+            .lock()
+            .unwrap()
+            .custom_mode_caret_style(&mode_name)
+    }
+
+    /// Register a keymap for a custom mode.  The `KeymapDefinition.custom_mode`
+    /// field must be `Some(mode_name)` and the `mode` field is treated as an
+    /// ignored sentinel.  The mapping is resolved by the engine's prefix matcher
+    /// rather than the modalkit state machine.
+    pub fn set_custom_keymap(&self, keymap_definition: KeymapDefinition) {
+        self.engine
+            .lock()
+            .unwrap()
+            .set_custom_mapping(keymap_definition);
+    }
+
+    /// Remove a custom-mode keymap by mode name and sequence.
+    pub fn del_custom_keymap(&self, mode_name: String, sequence: Vec<String>) {
+        self.engine
+            .lock()
+            .unwrap()
+            .del_custom_mapping(&mode_name, &sequence);
+    }
+
+    // ----- Phase 5: process_key -------------------------------------------
+
+    /// Process a raw DOM key event through the modal engine, returning a rich
+    /// [`KeyDisposition`] that the JS layer executes verbatim.
+    ///
+    /// This replaces the two-step `key_notation_from_event` →
+    /// `resolve_key_notation` pipeline: the JS side now hands the raw event
+    /// fields directly and receives a complete execution plan.
+    ///
+    /// Returns `None` for modifier-only or dead keys (same cases where
+    /// `key_notation_from_event` would return `None`), allowing the JS caller
+    /// to short-circuit with a simple null-check.
+    pub fn process_key(&self, event: KeyEventInfo) -> Option<KeyDisposition> {
+        self.engine.lock().unwrap().process_key_event(&event)
+    }
+
+    // ----- Phase 6: excmd registry & dot-repeat tracking ------------------
+
+    /// Return the full built-in excmd registry.
+    ///
+    /// Each entry includes the excmd name, description, whether it runs in the
+    /// content process (`content_flag`), and whether it can be dot-repeated
+    /// (`repeatable`).  Useful for which-key introspection, `glide.keymaps.list`,
+    /// and command-line completion.
+    pub fn excmd_registry(&self) -> Vec<ExcmdInfo> {
+        self.engine.lock().unwrap().excmd_registry()
+    }
+
+    /// Tokenize `input` (e.g. `"tab_next"` or `"mode_change normal"`) into a
+    /// [`ParsedExcmd`] containing the command name and positional arguments.
+    ///
+    /// Returns `Err` when the input is empty or the command name is not in the
+    /// built-in excmd registry.  User-defined excmds registered on the JS side
+    /// are not validated here.
+    pub fn parse_excmd(&self, input: String) -> Result<ParsedExcmd, ExcmdParseError> {
+        self.engine.lock().unwrap().parse_excmd(&input)
+    }
+
+    /// Record `parsed` as the most-recently executed excmd for dot-repeat.
+    ///
+    /// Only excmds flagged as `repeatable` in the registry are stored; calls
+    /// for non-repeatable commands are silently ignored so that
+    /// [`Self::repeat_last`] continues to return the last repeatable one.
+    pub fn note_executed(&self, parsed: ParsedExcmd) {
+        self.engine.lock().unwrap().note_executed(parsed);
+    }
+
+    /// Return the last repeatable excmd passed to [`Self::note_executed`], or
+    /// `None` when no repeatable excmd has been executed yet.
+    ///
+    /// The JS dot-repeat handler (`repeat_command`) calls this to reconstruct
+    /// the excmd string and dispatch it instead of the JS `#last_command`.
+    pub fn repeat_last(&self) -> Option<ParsedExcmd> {
+        self.engine.lock().unwrap().repeat_last()
     }
 }
