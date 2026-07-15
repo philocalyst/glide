@@ -34,12 +34,6 @@ export declare class AutomaticMoveDirection {
   static readonly EndOfLine: AutomaticMoveDirection;
 }
 
-export declare class CommandBarKind {
-  private constructor();
-  static readonly Search: CommandBarKind;
-  static readonly Command: CommandBarKind;
-}
-
 // ── Records (plain structured-clone-safe objects) ─────────────────────────────
 
 export declare class ModeChangeRequest {
@@ -55,11 +49,6 @@ export declare class ModeTransition {
   readonly previousMode: GlideMode;
   readonly nextMode: GlideMode;
   constructor(props: { previousMode: GlideMode; nextMode: GlideMode });
-}
-
-export declare class PendingSequenceDisplay {
-  readonly keyNotations: string[];
-  constructor(props: { keyNotations: string[] });
 }
 
 export declare class WireEditingTarget {
@@ -104,17 +93,6 @@ export declare class WireEditingAction {
   });
 }
 
-export declare class ResolvedKeyResult {
-  readonly defaultPrevented: boolean;
-  readonly modeTransition: ModeTransition | null;
-  readonly browserCommandIntents: BrowserCommandIntent[];
-  readonly pendingSequenceDisplay: PendingSequenceDisplay;
-  readonly matchedMapping: boolean;
-  readonly hasPartialMatch: boolean;
-  readonly matchedExcmd: string | null;
-  readonly matchedCallbackId: bigint | null;
-}
-
 export declare class KeymapDefinition {
   readonly mode: GlideMode;
   readonly sequence: string[];
@@ -155,8 +133,6 @@ export declare class KeyDisposition {
   readonly preventDefault: boolean;
   readonly sequenceDisplay: string[];
   readonly modeTransition: ModeTransition | null;
-  readonly armTimeoutMs: bigint | null;
-  readonly notifyContent: ContentNotification[];
   readonly instructions: Instruction[];
   readonly matchedMapping: boolean;
   readonly hasPartialMatch: boolean;
@@ -175,43 +151,39 @@ export declare class ParsedExcmd {
   constructor(props: { name: string; arguments: string[] });
 }
 
-// ── Data enums (namespace + variant classes) ──────────────────────────────────
+// ── Flat instruction records (kind-discriminated, structured-clone-safe) ──────
 
-export declare namespace BrowserCommandIntent {
-  export declare class ExecuteBrowserCommand {
-    readonly commandName: string;
-    readonly arguments: string[];
-    constructor(props: { commandName: string; arguments: string[] });
-  }
-  export declare class ExecuteEditingAction {
-    readonly action: WireEditingAction;
-    constructor(props: { action: WireEditingAction });
-  }
-  export declare class OpenCommandBar {
-    readonly promptPrefix: string;
-    readonly commandBarKind: CommandBarKind;
-    constructor(props: { promptPrefix: string; commandBarKind: CommandBarKind });
-  }
-  export declare class InsertText {
-    readonly text: string;
-    constructor(props: { text: string });
-  }
-  export declare class ApplyAutomaticMove {
-    readonly automaticMoveDirection: AutomaticMoveDirection;
-    constructor(props: { automaticMoveDirection: AutomaticMoveDirection });
-  }
-  export declare class OpenLine {
-    readonly above: boolean;
-    constructor(props: { above: boolean });
-  }
+/**
+ * One step of an insert-entry / dot-replayed insert session. Flat record with a
+ * `kind` discriminant (`open_line` | `automove` | `insert_text` | `move`); only
+ * the fields relevant to that `kind` are populated. Matches the browser-side
+ * `GlideInsertOp` shape 1:1.
+ */
+export declare class InsertOp {
+  readonly kind: string;
+  readonly above: boolean | null;
+  readonly direction: string | null;
+  readonly text: string | null;
+  readonly target: WireEditingTarget | null;
 }
-export type BrowserCommandIntent =
-  | BrowserCommandIntent.ExecuteBrowserCommand
-  | BrowserCommandIntent.ExecuteEditingAction
-  | BrowserCommandIntent.OpenCommandBar
-  | BrowserCommandIntent.InsertText
-  | BrowserCommandIntent.ApplyAutomaticMove
-  | BrowserCommandIntent.OpenLine;
+
+/**
+ * A single executable step from the engine. Flat record with a `kind`
+ * discriminant (`excmd` | `callback` | `editing-action` | `insert-sequence`);
+ * only the fields relevant to that `kind` are populated.
+ */
+export declare class Instruction {
+  readonly kind: string;
+  readonly command: string | null;
+  readonly arguments: string[];
+  readonly callbackId: bigint | null;
+  readonly sequence: string[];
+  readonly action: WireEditingAction | null;
+  readonly insertOps: InsertOp[];
+  readonly entersInsert: boolean;
+}
+
+// ── Data enums (namespace + variant classes) ──────────────────────────────────
 
 export declare namespace EngineCommand {
   export declare class ChangeMode {
@@ -232,98 +204,6 @@ export type EngineCommand =
   | EngineCommand.ChangeMode
   | EngineCommand.DispatchBrowserCommand
   | EngineCommand.Callback;
-
-export declare namespace InsertOp {
-  export declare class OpenLine {
-    readonly above: boolean;
-    constructor(props: { above: boolean });
-  }
-  export declare class AutoMove {
-    readonly direction: AutomaticMoveDirection;
-    constructor(props: { direction: AutomaticMoveDirection });
-  }
-  export declare class InsertText {
-    readonly text: string;
-    constructor(props: { text: string });
-  }
-  export declare class MoveToColumn {
-    readonly action: WireEditingAction;
-    constructor(props: { action: WireEditingAction });
-  }
-}
-export type InsertOp =
-  | InsertOp.OpenLine
-  | InsertOp.AutoMove
-  | InsertOp.InsertText
-  | InsertOp.MoveToColumn;
-
-export declare namespace Instruction {
-  export declare class Excmd {
-    readonly command: string;
-    readonly arguments: string[];
-    constructor(props: { command: string; arguments: string[] });
-  }
-  export declare class Callback {
-    readonly callbackId: bigint;
-    readonly sequence: string[];
-    constructor(props: { callbackId: bigint; sequence: string[] });
-  }
-  export declare class EditingAction {
-    readonly action: WireEditingAction;
-    constructor(props: { action: WireEditingAction });
-  }
-  export declare class OpenCommandBar {
-    readonly prefix: string;
-    constructor(props: { prefix: string });
-  }
-  export declare class HintFilter {
-    readonly label: string;
-    constructor(props: { label: string });
-  }
-  export declare class HintExecute {
-    readonly id: bigint;
-    constructor(props: { id: bigint });
-  }
-  export declare class HintExit {
-    constructor();
-  }
-  export declare class InsertSequence {
-    readonly ops: InsertOp[];
-    readonly entersInsert: boolean;
-    constructor(props: { ops: InsertOp[]; entersInsert: boolean });
-  }
-}
-export type Instruction =
-  | Instruction.Excmd
-  | Instruction.Callback
-  | Instruction.EditingAction
-  | Instruction.OpenCommandBar
-  | Instruction.HintFilter
-  | Instruction.HintExecute
-  | Instruction.HintExit
-  | Instruction.InsertSequence;
-
-export declare namespace ContentNotification {
-  export declare class KeyMappingPartial {
-    readonly sequence: string[];
-    constructor(props: { sequence: string[] });
-  }
-  export declare class KeyMappingComplete {
-    constructor();
-  }
-  export declare class Cancel {
-    constructor();
-  }
-  export declare class ModeChanged {
-    readonly mode: string;
-    constructor(props: { mode: string });
-  }
-}
-export type ContentNotification =
-  | ContentNotification.KeyMappingPartial
-  | ContentNotification.KeyMappingComplete
-  | ContentNotification.Cancel
-  | ContentNotification.ModeChanged;
 
 export declare namespace ExcmdParseError {
   export declare class EmptyInput {
@@ -347,24 +227,18 @@ export declare class GlideModalBridge {
   currentModeName(): string;
   setMode(mode: GlideMode): void;
   modeCaretStyle(mode: GlideMode): number;
-  modeNames(): string[];
 
   // Sequence
   currentSequence(): string[];
   resetSequence(): void;
 
-  // Key resolution (legacy path)
-  keyNotationFromEvent(event: KeyEventInfo): string | null;
-  resolveKeyNotation(keyNotation: string): ResolvedKeyResult;
-
-  // Key resolution (Phase 5: full driver)
+  // Key resolution: raw DOM event → full execution plan.
   processKey(event: KeyEventInfo): KeyDisposition | null;
 
   // Keymaps
   setKeymap(keymapDefinition: KeymapDefinition): void;
   delKeymap(mode: GlideMode, sequence: string[], buffer: boolean): void;
   clearBuffer(): void;
-  listKeymaps(mode: GlideMode): KeymapDefinition[];
 
   // Custom modes (Phase 4)
   registerCustomMode(modeName: string, caretStyle: number): void;

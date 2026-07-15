@@ -2,7 +2,7 @@ use std::sync::Mutex;
 
 use crate::actions::{
     ExcmdInfo, ExcmdParseError, GlideMode, KeyDisposition, KeyEventInfo, KeymapDefinition,
-    ParsedExcmd, ResolvedKeyResult,
+    ParsedExcmd,
 };
 use crate::engine::GlideModalEngine;
 
@@ -50,15 +50,6 @@ impl GlideModalBridge {
         mode.caret_style()
     }
 
-    /// All built-in mode names, in declaration order.
-    pub fn mode_names(&self) -> Vec<String> {
-        GlideMode::all().into_iter().map(|m| m.as_str().into()).collect()
-    }
-
-    pub fn list_keymaps(&self, mode: GlideMode) -> Vec<KeymapDefinition> {
-        self.engine.lock().unwrap().list_mappings(mode)
-    }
-
     pub fn set_keymap(&self, keymap_definition: KeymapDefinition) {
         self.engine.lock().unwrap().set_mapping(keymap_definition);
     }
@@ -70,22 +61,6 @@ impl GlideModalBridge {
     /// Remove all buffer-local mappings (e.g. on navigation).
     pub fn clear_buffer(&self) {
         self.engine.lock().unwrap().clear_buffer();
-    }
-
-    pub fn resolve_key_notation(&self, key_notation: String) -> ResolvedKeyResult {
-        self.engine.lock().unwrap().resolve_key_notation(&key_notation)
-    }
-
-    /// Convert a raw DOM keyboard event into Vim-style key notation.
-    ///
-    /// This is the Rust port of `Keys.event_to_key_notation` from
-    /// `utils/keys.mts`.  Returns `None` for modifier-only keypresses
-    /// (`Shift`, `Control`, …) and dead keys that Glide cannot handle.
-    ///
-    /// The JS layer should call this instead of `Keys.event_to_key_notation`
-    /// and skip processing when `None` is returned.
-    pub fn key_notation_from_event(&self, event: KeyEventInfo) -> Option<String> {
-        crate::key::key_notation_from_event(&event)
     }
 
     // ----- custom mode API -------------------------------------------------
@@ -194,5 +169,19 @@ impl GlideModalBridge {
     /// the excmd string and dispatch it instead of the JS `#last_command`.
     pub fn repeat_last(&self) -> Option<ParsedExcmd> {
         self.engine.lock().unwrap().repeat_last()
+    }
+}
+
+/// Test-only accessors into the engine's internal (non-FFI) resolution result.
+/// These drive the key-resolution unit tests without exercising the full
+/// `process_key` → [`KeyDisposition`] pipeline.
+#[cfg(test)]
+impl GlideModalBridge {
+    pub fn resolve_key_notation(&self, key_notation: String) -> crate::actions::ResolvedKeyResult {
+        self.engine.lock().unwrap().resolve_key_notation(&key_notation)
+    }
+
+    pub fn list_keymaps(&self, mode: GlideMode) -> Vec<KeymapDefinition> {
+        self.engine.lock().unwrap().list_mappings(mode)
     }
 }

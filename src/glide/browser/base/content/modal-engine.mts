@@ -227,10 +227,6 @@ export class GlideModalEngine {
    */
   #callback_map: Map<number, glide.ExcmdValue> = new Map();
 
-  #log: ConsoleInstance = console.createInstance
-    ? console.createInstance({ prefix: "Glide[Modal]", maxLogLevelPref: "glide.logging.loglevel" })
-    : (console as any);
-
   constructor() {
     this.#bridge = new RustGlideModal.GlideModalBridge();
     this.#register_builtin_keymaps();
@@ -448,86 +444,72 @@ export class GlideModalEngine {
     });
     if (!disp) return null;
 
-    const enters_insert = disp.modeTransition?.nextMode === RustGlideModal.GlideMode.Insert;
-    const instructions = disp.matchedMapping
-      ? this.#translate_instructions(disp, enters_insert)
-      : [];
-
     return {
       preventDefault: disp.preventDefault,
       sequenceDisplay: disp.sequenceDisplay,
       modeTransition: disp.modeTransition ? this.#rust_mode_name(disp.modeTransition.nextMode) : null,
       matchedMapping: disp.matchedMapping,
       hasPartialMatch: disp.hasPartialMatch,
-      instructions,
+      instructions: disp.matchedMapping ? this.#translate_instructions(disp) : [],
     };
   }
 
-  #translate_instructions(
-    disp: RustGlideModalT.KeyDisposition,
-    enters_insert: boolean,
-  ): ProcessedInstruction[] {
-    const out: ProcessedInstruction[] = [];
-
-    // Pure vim mode change (i/v/<Esc>) — no browser command intents, just a transition.
+  /**
+   * Map the engine's flat {@link RustGlideModalT.Instruction} records onto the
+   * browser-facing {@link ProcessedInstruction}s. Rust has already made every
+   * decision (operator resolved incl. `change` recovery, command bar expressed
+   * as its excmd), so this is a near-passthrough `switch` — the only JS-side
+   * step is resolving a callback id back to its closure.
+   */
+  #translate_instructions(disp: RustGlideModalT.KeyDisposition): ProcessedInstruction[] {
+    // A pure vim mode change (i/v/<Esc>) emits no instructions, just a transition.
     if (disp.instructions.length === 0 && disp.modeTransition) {
-      out.push({ kind: "mode-change" });
-      return out;
+      return [{ kind: "mode-change" }];
     }
 
+    const out: ProcessedInstruction[] = [];
     for (const instr of disp.instructions) {
-      if (instr instanceof RustGlideModal.Instruction.Callback) {
-        const cb = this.#callback_map.get(Number(instr.callbackId));
-        if (cb != null) out.push({ kind: "callback", cb, sequence: instr.sequence });
-      } else if (instr instanceof RustGlideModal.Instruction.EditingAction) {
-        const w = instr.action;
-        const op = w.operation === "delete" && enters_insert ? "change" : w.operation;
-        out.push({
-          kind: "excmd",
-          command: "motion",
-          editing_action: {
-            operation: op as GlideEditingAction["operation"],
-            character: w.character ?? undefined,
-            target: w.target as GlideEditingAction["target"],
-          },
-        });
-      } else if (instr instanceof RustGlideModal.Instruction.InsertSequence) {
-        out.push({
-          kind: "excmd",
-          command: "motion",
-          editing_action: {
-            operation: "insert",
-            ops: this.#translate_insert_ops(instr.ops),
-            entersInsert: instr.entersInsert,
-            target: { kind: "current-position", count: 0 },
-          },
-        });
-      } else if (instr instanceof RustGlideModal.Instruction.OpenCommandBar) {
-        out.push({ kind: "excmd", command: "commandline_show" });
-      } else if (instr instanceof RustGlideModal.Instruction.Excmd) {
-        const cmd = instr.arguments.length
-          ? `${instr.command} ${instr.arguments.join(" ")}`
-          : instr.command;
-        out.push({ kind: "excmd", command: cmd });
+      switch (instr.kind) {
+        case "callback": {
+          const cb = this.#callback_map.get(Number(instr.callbackId));
+          if (cb != null) out.push({ kind: "callback", cb, sequence: instr.sequence });
+          break;
+        }
+        case "editing-action": {
+          const action = instr.action!;
+          out.push({
+            kind: "excmd",
+            command: "motion",
+            editing_action: {
+              operation: action.operation as GlideEditingAction["operation"],
+              character: action.character ?? undefined,
+              target: action.target as GlideEditingAction["target"],
+            },
+          });
+          break;
+        }
+        case "insert-sequence":
+          out.push({
+            kind: "excmd",
+            command: "motion",
+            editing_action: {
+              operation: "insert",
+              // InsertOp records are already in `GlideInsertOp` shape.
+              ops: instr.insertOps as unknown as GlideInsertOp[],
+              entersInsert: instr.entersInsert,
+              target: { kind: "current-position", count: 0 },
+            },
+          });
+          break;
+        case "excmd":
+          out.push({
+            kind: "excmd",
+            command: instr.arguments.length ? `${instr.command} ${instr.arguments.join(" ")}` : instr.command!,
+          });
+          break;
       }
     }
     return out;
-  }
-
-  #translate_insert_ops(ops: RustGlideModalT.InsertOp[]): GlideInsertOp[] {
-    return ops.map(op => {
-      if (op instanceof RustGlideModal.InsertOp.OpenLine) return { kind: "open_line" as const, above: op.above };
-      if (op instanceof RustGlideModal.InsertOp.AutoMove) return {
-        kind: "automove" as const,
-        direction: op.direction === RustGlideModal.AutomaticMoveDirection.EndOfLine ? "endline" : "left" as const,
-      };
-      if (op instanceof RustGlideModal.InsertOp.InsertText) return { kind: "insert_text" as const, text: op.text };
-      if (op instanceof RustGlideModal.InsertOp.MoveToColumn) return {
-        kind: "move" as const,
-        target: op.action.target as GlideEditingAction["target"],
-      };
-      return { kind: "open_line" as const, above: false };
-    });
   }
 
   // ----- Phase 6: excmd registry & dot-repeat ----------------------------

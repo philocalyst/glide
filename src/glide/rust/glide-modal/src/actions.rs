@@ -13,7 +13,8 @@ pub type KeySequence = Vec<KeyNotation>;
 /// Positional arguments forwarded alongside a dispatched browser command.
 pub type BrowserCommandArguments = Vec<String>;
 
-#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize, uniffi::Enum)]
+/// Internal only: which command bar a modalkit `CommandBar(Focus)` targets.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum CommandBarKind {
     Search,
     Command,
@@ -85,126 +86,6 @@ pub enum AutomaticMoveDirection {
     EndOfLine,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum MotionDirection {
-    Previous,
-    Next,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum WordStyleName {
-    Little,
-    Big,
-    Keyword,
-    NonAlphanumeric,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub enum MotionIntent {
-    Column {
-        direction: MotionDirection,
-        wrap: bool,
-    },
-    /// First column of the current line (`0`).
-    LineStart,
-    /// End of the current line (`$`).
-    LineEnd,
-    /// First non-blank character of a line (`^`).
-    FirstWord {
-        direction: MotionDirection,
-    },
-    /// Whole-line vertical motion (`j` / `k`).
-    Line {
-        direction: MotionDirection,
-    },
-    WordBegin {
-        direction: MotionDirection,
-        word_style: WordStyleName,
-    },
-    /// End of a word (`e` / `ge`).
-    WordEnd {
-        direction: MotionDirection,
-        word_style: WordStyleName,
-    },
-    /// Paragraph boundary (`{` / `}`).
-    ParagraphBegin {
-        direction: MotionDirection,
-    },
-    RawDescription {
-        description: String,
-    },
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub enum EditorOperationIntent {
-    Motion,
-    Delete,
-    Yank,
-    /// Replace the target with `character` (`r{char}`). The char is resolved
-    /// from modalkit's `CharReplaceSuffix` submode into the edit context.
-    Replace { character: String },
-    RawDescription { description: String },
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub enum EditTargetIntent {
-    CurrentPosition,
-    CurrentSelection,
-    LineRange {
-        count: u32,
-        include_line_break: bool,
-    },
-    Motion {
-        motion: MotionIntent,
-        count: u32,
-    },
-    /// Text object around the cursor (Stage B): `iw`, `di(`, `ci"`, …
-    Range {
-        range: RangeTargetIntent,
-        inclusive: bool,
-        count: u32,
-    },
-    RawDescription {
-        description: String,
-    },
-}
-
-/// A typed text-object kind, mirroring modalkit's `RangeType`.
-///
-/// Only the variants modalkit actually resolves are surfaced here; `Paragraph`,
-/// `Sentence`, and `XmlTag` are `XXX: implement` in modalkit 0.0.24 but still
-/// carried through so callers can fall back when they arrive.
-///
-/// `char` fields are `String`s because uniffi doesn't support `char` directly;
-/// each holds a single UTF-8 character.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub enum RangeTargetIntent {
-    /// `iw` / `aw` — a word (with optional whitespace when inclusive).
-    Word { word_style: WordStyleName },
-    /// `i(` / `a(` — text between matching bracket characters.
-    Bracketed { left: String, right: String },
-    /// `i"` / `a"` — text between matching quote characters.
-    Quote { quote: String },
-    /// `it` / `at` — XML tag block (modalkit stub).
-    XmlTag,
-    /// `ip` / `ap` — paragraph (modalkit stub).
-    Paragraph,
-    /// `is` / `as` — sentence (modalkit stub).
-    Sentence,
-    /// `Line` range (handled by `LineRange`, kept for completeness).
-    Line,
-    /// `Buffer` range.
-    Buffer,
-    /// `Item` range (`ib`-style matching).
-    Item,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct EditingActionIntent {
-    pub operation: EditorOperationIntent,
-    pub target: EditTargetIntent,
-}
-
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize, uniffi::Record)]
 pub struct ModeChangeRequest {
     pub target_mode: GlideMode,
@@ -217,12 +98,16 @@ pub struct ModeTransition {
     pub next_mode: GlideMode,
 }
 
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, uniffi::Record)]
+/// Internal only: the pending key notations to display while a sequence is
+/// composing. Reached JS through `KeyDisposition::sequence_display`.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct PendingSequenceDisplay {
     pub key_notations: Vec<String>,
 }
 
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, uniffi::Enum)]
+/// Internal intermediate between the modalkit action stream and the flat
+/// [`Instruction`]s handed to JS. Never crosses the FFI boundary.
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub enum BrowserCommandIntent {
     ExecuteBrowserCommand {
         command_name: String,
@@ -247,7 +132,9 @@ pub enum BrowserCommandIntent {
     },
 }
 
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, uniffi::Record)]
+/// Internal result of resolving one key against the machine. Folded into a
+/// [`KeyDisposition`] before crossing to JS; never an FFI type itself.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct ResolvedKeyResult {
     pub default_prevented: bool,
     pub mode_transition: Option<ModeTransition>,
@@ -255,29 +142,8 @@ pub struct ResolvedKeyResult {
     pub pending_sequence_display: PendingSequenceDisplay,
     pub matched_mapping: bool,
     pub has_partial_match: bool,
-    /// The excmd string when the matched command was a `DispatchBrowserCommand`.
-    /// JS can use this directly instead of calling `#synthesize_command`.
-    pub matched_excmd: Option<String>,
     /// The opaque callback id when the matched command was a `Callback`.
-    /// JS looks this up in its `#callback_map` to invoke the original closure.
     pub matched_callback_id: Option<u64>,
-}
-
-impl Default for ResolvedKeyResult {
-    fn default() -> Self {
-        Self {
-            default_prevented: false,
-            mode_transition: None,
-            browser_command_intents: Vec::new(),
-            pending_sequence_display: PendingSequenceDisplay {
-                key_notations: Vec::new(),
-            },
-            matched_mapping: false,
-            has_partial_match: false,
-            matched_excmd: None,
-            matched_callback_id: None,
-        }
-    }
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, uniffi::Enum)]
@@ -289,9 +155,8 @@ pub enum EngineCommand {
         command_name: String,
         arguments: Vec<String>,
     },
-    /// A JS closure registered for this sequence.  Rust stores the opaque id
-    /// so that `ResolvedKeyResult::matched_callback_id` can carry it back to
-    /// JS without any separate registry look-up.
+    /// A JS closure registered for this sequence. Rust stores the opaque id and
+    /// hands it back in `Instruction::callback_id` so JS can invoke the closure.
     Callback {
         callback_id: u64,
     },
@@ -392,10 +257,10 @@ pub struct KeyEventInfo {
 /// A flat, structured-clone-safe wire representation of an edit target.
 ///
 /// All variant-specific fields are optional; only the fields relevant to the
-/// `kind` are populated. This survives Firefox IPC (parent → content) unchanged
-/// because it contains only primitive types that the structured-clone algorithm
-/// handles natively.
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, uniffi::Record)]
+/// `kind` are populated (the rest stay `Default::default()`). This survives
+/// Firefox IPC (parent → content) unchanged because it contains only primitive
+/// types that the structured-clone algorithm handles natively.
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize, uniffi::Record)]
 pub struct WireEditingTarget {
     pub kind: String,
     pub motion: Option<String>,
@@ -422,9 +287,10 @@ pub struct WireEditingAction {
 
 // ── Phase 5: KeyDisposition ──────────────────────────────────────────────────
 
-/// A rich instruction packet returned by [`crate::bridge::GlideModalBridge::process_key`]
-/// that the JS layer executes verbatim, replacing the old
-/// `ResolvedKeyResult` → synthesize → dispatch pipeline.
+/// The complete instruction packet returned by
+/// [`crate::bridge::GlideModalBridge::process_key`]. The JS layer executes it
+/// verbatim: prevent the default, update the sequence display, then run each
+/// [`Instruction`] in order.
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize, uniffi::Record)]
 pub struct KeyDisposition {
     /// Whether the browser's default action for this key event should be suppressed.
@@ -433,54 +299,89 @@ pub struct KeyDisposition {
     pub sequence_display: Vec<String>,
     /// A mode transition emitted by this key, if any.
     pub mode_transition: Option<ModeTransition>,
-    /// When `Some`, the JS layer should arm a key-sequence timeout after this many ms.
-    /// (Reserved for future insert-mode timeout; always `None` in Phase 5.)
-    pub arm_timeout_ms: Option<u64>,
-    /// Notifications to forward to the content process (e.g. partial-match display).
-    pub notify_content: Vec<ContentNotification>,
     /// Ordered list of instructions for the JS layer to execute.
     pub instructions: Vec<Instruction>,
     /// True when the key fully matched a registered mapping.
-    #[uniffi(default = false)]
     pub matched_mapping: bool,
     /// True when the key extended a partial sequence (more keys expected).
-    #[uniffi(default = false)]
     pub has_partial_match: bool,
 }
 
-/// A primitive step within an insert-entry or dot-replayed insert session.
-/// These are applied in order by the content executor after `Instruction::InsertSequence`.
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, uniffi::Enum)]
-pub enum InsertOp {
-    /// Open a new line (from `o` / `O`).
-    OpenLine { above: bool },
-    /// Move the caret automatically before entering insert mode (from `a`/`A`/`I`).
-    AutoMove { direction: AutomaticMoveDirection },
-    /// Insert literal text (from `.`-replay of a typed insert session).
-    InsertText { text: String },
-    /// Entry motion for `a`/`A`/`I` that carries a column-move editing action.
-    MoveToColumn { action: WireEditingAction },
+/// A primitive step within an insert-entry or dot-replayed insert session,
+/// applied in order by the content executor. This is a flat record (rather than
+/// a data enum) so it structured-clones into the content process untouched and
+/// maps 1:1 onto the JS `GlideInsertOp` shape — no translation required.
+///
+/// `kind` is one of `open_line` / `automove` / `insert_text` / `move`; only the
+/// fields relevant to that `kind` are populated.
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize, uniffi::Record)]
+pub struct InsertOp {
+    pub kind: String,
+    /// `open_line`: open below (`false`) or above (`true`).
+    pub above: Option<bool>,
+    /// `automove`: `"left"` or `"endline"`.
+    pub direction: Option<String>,
+    /// `insert_text`: the literal text to type.
+    pub text: Option<String>,
+    /// `move`: the entry-motion target for `a` / `A` / `I`.
+    pub target: Option<WireEditingTarget>,
 }
 
-/// A single executable step produced by the modal engine for a resolved key event.
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, uniffi::Enum)]
-pub enum Instruction {
-    /// Execute a browser excmd string with optional positional arguments.
-    Excmd { command: String, arguments: Vec<String> },
-    /// Invoke the JS closure stored under `callback_id` in the engine's callback map.
-    Callback { callback_id: u64, sequence: Vec<String> },
-    /// Apply a typed editing action in the content process.
-    EditingAction { action: WireEditingAction },
-    /// Open the command bar with the given prompt prefix.
-    OpenCommandBar { prefix: String },
-    /// Filter visible hint labels by the typed character (hint mode).
-    HintFilter { label: String },
-    /// Execute the hint with the given numeric id (hint mode).
-    HintExecute { id: u64 },
-    /// Exit hint mode without executing anything.
-    HintExit,
-    /// Apply an insert-entry or dot-replayed insert session (o/O/i/a/A/I and `.`).
-    InsertSequence { ops: Vec<InsertOp>, enters_insert: bool },
+impl InsertOp {
+    pub fn open_line(above: bool) -> Self {
+        Self { kind: "open_line".into(), above: Some(above), ..Default::default() }
+    }
+
+    /// `direction` is `"left"` or `"endline"`.
+    pub fn automove(direction: impl Into<String>) -> Self {
+        Self { kind: "automove".into(), direction: Some(direction.into()), ..Default::default() }
+    }
+
+    pub fn insert_text(text: impl Into<String>) -> Self {
+        Self { kind: "insert_text".into(), text: Some(text.into()), ..Default::default() }
+    }
+
+    pub fn move_to(target: WireEditingTarget) -> Self {
+        Self { kind: "move".into(), target: Some(target), ..Default::default() }
+    }
+}
+
+/// A single executable step produced by the engine for a resolved key event.
+///
+/// Flat record with a `kind` discriminant so JS dispatches with `switch (kind)`
+/// instead of uniffi `instanceof` checks. `kind` is one of:
+///   - `excmd`           → run `command` + `arguments`
+///   - `callback`        → invoke the JS closure `callback_id` (matched `sequence`)
+///   - `editing-action`  → apply `action` in the content process
+///   - `insert-sequence` → apply `insert_ops` then settle into insert if `enters_insert`
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize, uniffi::Record)]
+pub struct Instruction {
+    pub kind: String,
+    pub command: Option<String>,
+    pub arguments: Vec<String>,
+    pub callback_id: Option<u64>,
+    pub sequence: Vec<String>,
+    pub action: Option<WireEditingAction>,
+    pub insert_ops: Vec<InsertOp>,
+    pub enters_insert: bool,
+}
+
+impl Instruction {
+    pub fn excmd(command: impl Into<String>, arguments: Vec<String>) -> Self {
+        Self { kind: "excmd".into(), command: Some(command.into()), arguments, ..Default::default() }
+    }
+
+    pub fn callback(callback_id: u64, sequence: Vec<String>) -> Self {
+        Self { kind: "callback".into(), callback_id: Some(callback_id), sequence, ..Default::default() }
+    }
+
+    pub fn editing_action(action: WireEditingAction) -> Self {
+        Self { kind: "editing-action".into(), action: Some(action), ..Default::default() }
+    }
+
+    pub fn insert_sequence(insert_ops: Vec<InsertOp>, enters_insert: bool) -> Self {
+        Self { kind: "insert-sequence".into(), insert_ops, enters_insert, ..Default::default() }
+    }
 }
 
 // ── Phase 6: excmd registry ──────────────────────────────────────────────────
@@ -520,16 +421,3 @@ pub struct ParsedExcmd {
     pub arguments: Vec<String>,
 }
 
-/// A notification to forward from the parent process to the content process
-/// after key resolution so the content layer can update its display state.
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize, uniffi::Enum)]
-pub enum ContentNotification {
-    /// A key sequence is in progress; show the given notations in the status bar.
-    KeyMappingPartial { sequence: Vec<String> },
-    /// A key sequence fully matched; clear any partial display.
-    KeyMappingComplete,
-    /// The in-progress sequence was cancelled (no match found, no partial left).
-    Cancel,
-    /// The active mode has changed; the content process should update the caret / status bar.
-    ModeChanged { mode: String },
-}
